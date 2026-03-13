@@ -1,0 +1,143 @@
+// ===========================================
+// Setup utility
+// Run this once to find your WhatsApp Group ID.
+// Usage: npm run setup
+// ===========================================
+
+require('dotenv').config();
+
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  delay,
+} = require('@whiskeysockets/baileys');
+const qrcode = require('qrcode-terminal');
+
+console.log('===========================================');
+console.log('  Red Alert WhatsApp Bot — Setup');
+console.log('===========================================');
+console.log('');
+console.log('This will connect to WhatsApp and list');
+console.log('all your groups so you can find the group ID.');
+console.log('');
+
+// ------------------------------------------
+// Display groups and exit
+// ------------------------------------------
+function displayGroups(groups) {
+  if (groups.length === 0) {
+    console.log('\n❌ No groups found. Make sure your account has groups.');
+    return;
+  }
+
+  console.log('\n===========================================');
+  console.log(`  Found ${groups.length} groups:`);
+  console.log('===========================================\n');
+
+  for (const group of groups) {
+    console.log(`  📌 "${group.name}"`);
+    console.log(`     ID: ${group.id}`);
+    console.log('');
+  }
+
+  console.log('===========================================');
+  console.log('');
+  console.log('Copy the ID of the group you want alerts');
+  console.log('sent to, and paste it into your .env file:');
+  console.log('');
+  console.log('  WHATSAPP_GROUP_ID=<paste ID here>');
+  console.log('');
+  console.log('===========================================');
+}
+
+// ------------------------------------------
+// Setup
+// ------------------------------------------
+async function setup() {
+  const { state, saveCreds } = await useMultiFileAuthState('./whatsapp-session-baileys');
+
+  const sock = makeWASocket({
+    auth: state,
+    version: [2, 3000, 1034074495],
+    printQRInTerminal: false,
+    browser: ['Alert Bot', 'Chrome', '1.0.0'],
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      console.log('\n📱 Scan this QR code with WhatsApp on your phone:\n');
+      qrcode.generate(qr, { small: true });
+    }
+
+    if (connection === 'close') {
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      if (statusCode === DisconnectReason.loggedOut) {
+        console.error('❌ Logged out. Delete ./whatsapp-session-baileys/ and try again.');
+        process.exit(1);
+      } else {
+        console.log(`⚠️  Connection closed (${statusCode}), reconnecting...`);
+        await delay(3000);
+        setup();
+      }
+      return;
+    }
+
+    if (connection === 'open') {
+      console.log('\n✅ WhatsApp is connected!');
+      console.log('⏳ Fetching groups...\n');
+
+      try {
+        await delay(3000);
+
+        const groupData = await sock.groupFetchAllParticipating();
+        const groups = Object.values(groupData).map((g) => ({
+          name: g.subject,
+          id: g.id,
+        }));
+
+        displayGroups(groups);
+      } catch (err) {
+        console.error('❌ Error fetching groups:', err.message);
+        console.log('');
+        console.log('   Alternative method:');
+        console.log('   1. Keep this script running');
+        console.log('   2. Send "!groupid" in the WhatsApp group');
+        console.log('   3. The ID will appear here in the console\n');
+        console.log('   Waiting for !groupid messages...');
+
+        sock.ev.on('messages.upsert', async ({ messages }) => {
+          for (const msg of messages) {
+            if (!msg.message) continue;
+            const text =
+              msg.message.conversation ||
+              msg.message.extendedTextMessage?.text ||
+              '';
+            if (text === '!groupid' && msg.key.remoteJid.endsWith('@g.us')) {
+              const groupId = msg.key.remoteJid;
+              console.log(`\n📌 Group ID detected from message:`);
+              console.log(`   Group: ${groupId}`);
+              console.log(`   Copy this into your .env as WHATSAPP_GROUP_ID\n`);
+              await sock.sendMessage(groupId, {
+                text: `Group ID: ${groupId}`,
+              });
+            }
+          }
+        });
+        return;
+      }
+
+      sock.end(undefined);
+      process.exit(0);
+    }
+  });
+}
+
+setup().catch((err) => {
+  console.error('❌ Setup failed:', err);
+  process.exit(1);
+});

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+package-lock.json
+
+# WhatsApp sessions
+whatsapp-session/
+whatsapp-session-baileys/
+
+# Logs
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
