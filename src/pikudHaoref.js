@@ -20,21 +20,6 @@ const REQUEST_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 };
 
-// Map Pikud HaOref category numbers to our normalized type keys
-// Keys are strings because the API returns cat as a string
-const CATEGORY_TO_TYPE = {
-  '1': 'missiles',
-  '2': 'hostileAircraftIntrusion',
-  '3': 'earthQuake',
-  '4': 'tsunami',
-  '5': 'hazardousMaterials',
-  '6': 'terroristInfiltration',
-  '7': 'radiologicalEvent',
-  '10': 'newsFlash',
-  '13': 'eventEnded',
-  '14': 'preAlert',
-};
-
 class PikudHaorefSource {
   /**
    * @param {Object} opts
@@ -81,7 +66,8 @@ class PikudHaorefSource {
 
         const normalized = {
           id: data.id,
-          type: CATEGORY_TO_TYPE[data.cat] || data.cat,
+          cat: data.cat,
+          title: data.title || '',
           cities: data.data || [],
           instructions: data.desc || '',
           source: 'pikud_haoref',
@@ -120,14 +106,15 @@ class PikudHaorefSource {
           if (now - alertTime < 30000) {
             const normalized = {
               id: historyId,
-              type: CATEGORY_TO_TYPE[latest.category] || latest.category,
+              cat: String(latest.category),
+              title: latest.title || '',
               cities: latest.data ? [latest.data] : [],
-              instructions: latest.title || '',
+              instructions: latest.desc || '',
               source: 'pikud_haoref',
               raw: latest,
             };
             logger.info('Pikud HaOref (history): new alert', {
-              type: normalized.type,
+              cat: normalized.cat,
               cities: normalized.cities,
             });
             this.onAlert(normalized);

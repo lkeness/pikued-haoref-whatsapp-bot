@@ -14,11 +14,11 @@ class AlertDeduplicator {
 
   /**
    * Generate a dedup key from an alert.
-   * We combine the alert type + sorted city names.
+   * We combine the alert category + sorted city names.
    */
   makeKey(alert) {
     const cities = (alert.cities || []).slice().sort().join('|');
-    return `${alert.type}::${cities}`;
+    return `${alert.cat}::${cities}`;
   }
 
   /**

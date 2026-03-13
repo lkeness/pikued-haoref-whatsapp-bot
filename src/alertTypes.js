@@ -1,89 +1,44 @@
 // ===========================================
-// Alert type mappings and message formatting
+// Alert message formatting
+//
+// Uses raw data from Pikud HaOref directly —
+// title, desc, data (cities), cat — with no
+// local category-to-type mapping.
 // ===========================================
-
-// Map Pikud HaOref category numbers to alert types
-const ALERT_CATEGORIES = {
-  1: { he: 'ירי רקטות וטילים', en: 'Rocket & Missile Fire', emoji: '🚀🔴' },
-  2: { he: 'חדירת כלי טיס עוין', en: 'Hostile Aircraft Intrusion', emoji: '✈️🔴' },
-  3: { he: 'רעידת אדמה', en: 'Earthquake', emoji: '🌍⚠️' },
-  4: { he: 'צונאמי', en: 'Tsunami', emoji: '🌊⚠️' },
-  5: { he: 'חומרים מסוכנים', en: 'Hazardous Materials', emoji: '☣️⚠️' },
-  6: { he: 'חדירת מחבלים', en: 'Terrorist Infiltration', emoji: '⚠️🔴' },
-  7: { he: 'אירוע רדיולוגי', en: 'Radiological Event', emoji: '☢️⚠️' },
-  10: { he: 'עדכון מיוחד', en: 'Special Update / News Flash', emoji: '📢' },
-  13: { he: 'האירוע הסתיים', en: 'Event Ended - All Clear', emoji: '✅' },
-  14: { he: 'התרעה מקדימה', en: 'Pre-Alert Warning', emoji: '⚡⚠️' },
-};
-
-// Alert type lookup by normalized key
-const ALERT_TYPE_MAP = {
-  'missiles': { he: 'ירי רקטות וטילים', en: 'Rocket & Missile Fire', emoji: '🚀🔴' },
-  'radiologicalEvent': { he: 'אירוע רדיולוגי', en: 'Radiological Event', emoji: '☢️⚠️' },
-  'earthQuake': { he: 'רעידת אדמה', en: 'Earthquake', emoji: '🌍⚠️' },
-  'tsunami': { he: 'צונאמי', en: 'Tsunami', emoji: '🌊⚠️' },
-  'hostileAircraftIntrusion': { he: 'חדירת כלי טיס עוין', en: 'Hostile Aircraft Intrusion', emoji: '✈️🔴' },
-  'hazardousMaterials': { he: 'חומרים מסוכנים', en: 'Hazardous Materials', emoji: '☣️⚠️' },
-  'terroristInfiltration': { he: 'חדירת מחבלים', en: 'Terrorist Infiltration', emoji: '⚠️🔴' },
-  'newsFlash': { he: 'עדכון מיוחד', en: 'Special Update / News Flash', emoji: '📢' },
-  'eventEnded': { he: 'האירוע הסתיים', en: 'Event Ended - All Clear', emoji: '✅' },
-  'preAlert': { he: 'התרעה מקדימה', en: 'Pre-Alert Warning', emoji: '⚡⚠️' },
-};
 
 const { translateCities, translateInstruction } = require('./translate');
 
+// Keywords in the title/desc that indicate a release / all-clear message
+const RELEASE_KEYWORDS = [
+  'יכולים לצאת',
+  'ניתן לצאת',
+  'לחזור לשגרה',
+  'הסתיים',
+  'סיום',
+];
+
+function isReleaseMessage(alert) {
+  const textToScan = [
+    alert.title || '',
+    alert.instructions || '',
+  ].join(' ');
+  return RELEASE_KEYWORDS.some((kw) => textToScan.includes(kw));
+}
+
 /**
- * Format an alert into a bilingual WhatsApp message.
+ * Format an alert into a WhatsApp message using raw Pikud HaOref data.
  *
  * @param {Object} alert - Normalized alert object
- * @param {string} alert.type - Alert type key (e.g. 'missiles')
+ * @param {string} alert.cat - Raw category number from Pikud HaOref
+ * @param {string} alert.title - Alert title from the API (Hebrew)
  * @param {string[]} alert.cities - List of affected city names (Hebrew)
- * @param {string} [alert.instructions] - Instructions from HFC
+ * @param {string} [alert.instructions] - Instructions / desc from HFC
  * @param {string} alert.id - Unique alert identifier
  * @returns {string} Formatted WhatsApp message
  */
 function formatAlertMessage(alert) {
-  const typeInfo = ALERT_TYPE_MAP[alert.type]
-    || ALERT_CATEGORIES[alert.type]
-    || null;
-
-  // Unknown alert type — show raw data transparently, don't guess
-  if (!typeInfo) {
-    const now = new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
-    const translatedCities = alert.cities && alert.cities.length > 0
-      ? translateCities(alert.cities)
-      : [];
-    const cityList = translatedCities.length > 0
-      ? translatedCities.join(', ')
-      : 'כל הארץ / Nationwide';
-
-    const lines = [
-      `⚠️ *התרעה לא מזוהה / UNRECOGNIZED ALERT* ⚠️`,
-      '',
-      `🔢 *קטגוריה / Category:* ${alert.raw?.cat || alert.type}`,
-    ];
-    if (alert.raw?.title) {
-      lines.push(`📝 *כותרת / Title:* ${alert.raw.title}`);
-    }
-    lines.push('', `📍 ${cityList}`);
-    if (alert.instructions) {
-      const enInstruction = translateInstruction(alert.instructions);
-      lines.push('', `📋 ${alert.instructions}`);
-      if (enInstruction) lines.push(enInstruction);
-    }
-    lines.push('', `🕐 ${now}`);
-    return lines.join('\n');
-  }
-
   const now = new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
-  const isEventEnded = alert.type === 'eventEnded';
-  const isPreAlert = alert.type === 'preAlert';
-
-  // For "event ended" and "pre-alert", use the title from the API directly
-  const heTitle = ((isEventEnded || isPreAlert) && alert.raw && alert.raw.title)
-    ? alert.raw.title
-    : typeInfo.he;
-  const enTitle = typeInfo.en;
+  const title = alert.title || 'התרעה';
 
   // Translate city names: "Tel Aviv (תל אביב), Haifa (חיפה)"
   const translatedCities = alert.cities && alert.cities.length > 0
@@ -94,42 +49,39 @@ function formatAlertMessage(alert) {
   const MAX_CITIES_DISPLAY = 20;
   let cityList;
   if (translatedCities.length === 0) {
-    cityList = 'כל הארץ / Nationwide';
+    cityList = 'כל הארץ';
   } else if (translatedCities.length > MAX_CITIES_DISPLAY) {
     const shown = translatedCities.slice(0, MAX_CITIES_DISPLAY).join(', ');
     const remaining = translatedCities.length - MAX_CITIES_DISPLAY;
-    cityList = `${shown}\n... ועוד ${remaining} ישובים / and ${remaining} more`;
+    cityList = `${shown}\n... ועוד ${remaining} ישובים`;
   } else {
     cityList = translatedCities.join(', ');
   }
 
-  // Shorter format for "event ended"
-  if (isEventEnded) {
+  // Release / all-clear messages get a shorter format
+  if (isReleaseMessage(alert)) {
     const lines = [
-      `✅ *${heTitle}*`,
-      `✅ *${enTitle}*`,
+      `*${title}*`,
       '',
       `📍 ${cityList}`,
-      '',
-      `🕐 ${now}`,
     ];
+    if (alert.instructions) {
+      lines.push('', alert.instructions);
+    }
+    lines.push('', `🕐 ${now}`);
     return lines.join('\n');
   }
 
+  // Standard alert format
   const lines = [
-    `${typeInfo.emoji} *התרעה / ALERT* ${typeInfo.emoji}`,
+    `*${title}*`,
     '',
-    `🇮🇱 *${heTitle}*`,
-    `🇬🇧 *${enTitle}*`,
-    '',
-    `📍 *אזורים / Areas:*`,
-    cityList,
+    `📍 ${cityList}`,
     '',
   ];
 
   if (alert.instructions) {
     const enInstruction = translateInstruction(alert.instructions);
-    lines.push(`📋 *הנחיות / Instructions:*`);
     lines.push(alert.instructions);
     if (enInstruction) {
       lines.push(enInstruction);
@@ -138,9 +90,9 @@ function formatAlertMessage(alert) {
   }
 
   lines.push(`🕐 ${now}`);
-  lines.push(`📡 מקור / Source: פיקוד העורף / Home Front Command`);
+  lines.push(`📡 מקור: פיקוד העורף`);
 
   return lines.join('\n');
 }
 
-module.exports = { ALERT_CATEGORIES, ALERT_TYPE_MAP, formatAlertMessage };
+module.exports = { isReleaseMessage, formatAlertMessage };

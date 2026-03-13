@@ -10,6 +10,7 @@ require('dotenv').config();
 const fs = require('fs');
 const logger = require('./logger');
 const { formatAlertMessage } = require('./alertTypes');
+const AlertCategory = require('./alertCategories');
 const { generateAlertImage } = require('./alertImage');
 const AlertDeduplicator = require('./dedup');
 const PikudHaorefSource = require('./pikudHaoref');
@@ -60,8 +61,8 @@ const whatsapp = new WhatsAppClient({
 // Central alert handler
 // ------------------------------------------
 async function handleAlert(alert) {
-  // Suppress "event ended" if configured
-  if (alert.type === 'eventEnded' && !config.sendEventEnded) {
+  // Suppress "event ended" (cat 13) if configured
+  if (alert.cat === AlertCategory.EVENT_ENDED && !config.sendEventEnded) {
     return;
   }
 
@@ -77,10 +78,10 @@ async function handleAlert(alert) {
   }
 
   // At this point the alert matched our cities — always log this
-  logger.info(`⚠ MATCHED ALERT: ${alert.type} → ${alert.cities.join(', ')}`, {
+  logger.info(`⚠ MATCHED ALERT: cat=${alert.cat} "${alert.title}" → ${alert.cities.join(', ')}`, {
     id: alert.raw?.id,
-    cat: alert.raw?.cat,
-    title: alert.raw?.title,
+    cat: alert.cat,
+    title: alert.title,
   });
 
   // Dedup check (don't mark as seen yet)

@@ -16,7 +16,8 @@
 const sharp = require('sharp');
 const path = require('path');
 const os = require('os');
-const { ALERT_TYPE_MAP, ALERT_CATEGORIES } = require('./alertTypes');
+const { isReleaseMessage } = require('./alertTypes');
+const AlertCategory = require('./alertCategories');
 
 // ------------------------------------------
 // Official Pikud HaOref logo as base64 PNG
@@ -60,33 +61,17 @@ const COLORS = {
   },
 };
 
-const RELEASE_KEYWORDS = [
-  'יכולים לצאת',
-  'ניתן לצאת',
-  'לחזור לשגרה',
-  'הסתיים',
-  'סיום',
-];
-
-function isReleaseMessage(alert) {
-  const textToScan = [
-    alert.instructions || '',
-    alert.raw?.title || '',
-    alert.raw?.desc || '',
-  ].join(' ');
-  return RELEASE_KEYWORDS.some((kw) => textToScan.includes(kw));
-}
-
 function getColors(alert) {
-  if (alert.type === 'eventEnded') return COLORS.eventEnded;
-  if (alert.type === 'newsFlash') {
+  if (alert.cat === AlertCategory.EVENT_ENDED) return COLORS.eventEnded;
+  if (alert.cat === AlertCategory.NEWS_FLASH) {
     return isReleaseMessage(alert) ? COLORS.eventEnded : COLORS.newsFlash;
   }
   return COLORS.active;
 }
 
 function isEventEndedStyle(alert) {
-  return alert.type === 'eventEnded' || (alert.type === 'newsFlash' && isReleaseMessage(alert));
+  return alert.cat === AlertCategory.EVENT_ENDED
+    || (alert.cat === AlertCategory.NEWS_FLASH && isReleaseMessage(alert));
 }
 
 // ------------------------------------------
@@ -124,7 +109,9 @@ function iconExclamation(cx, cy, color) {
 }
 
 function getIcon(alert, cx, cy, color) {
-  if (alert.type === 'eventEnded' || alert.type === 'preAlert' || alert.type === 'newsFlash') {
+  if (alert.cat === AlertCategory.EVENT_ENDED
+    || alert.cat === AlertCategory.PRE_ALERT
+    || alert.cat === AlertCategory.NEWS_FLASH) {
     return iconExclamation(cx, cy, color);
   }
   return iconBroadcast(cx, cy, color);
@@ -167,20 +154,7 @@ async function generateAlertImage(alert) {
   const colors = getColors(alert);
   const eventEndedLook = isEventEndedStyle(alert);
 
-  const typeInfo = ALERT_TYPE_MAP[alert.type]
-    || ALERT_CATEGORIES[alert.type]
-    || null;
-
-  const isNewsFlashRelease = alert.type === 'newsFlash' && isReleaseMessage(alert);
-
-  let title;
-  if (isNewsFlashRelease) {
-    title = alert.raw?.title || 'עדכון';
-  } else if (alert.raw?.title) {
-    title = alert.raw.title;
-  } else {
-    title = typeInfo ? typeInfo.he : 'התרעה';
-  }
+  const title = alert.title || 'התרעה';
 
   const MAX_CITIES = 15;
   const cities = alert.cities || [];
