@@ -1,103 +1,146 @@
-// ===========================================
-// WhatsApp client using @whiskeysockets/baileys
-// Handles Socket auth, session persistence,
-// sending messages, and preventive restarts.
-// ===========================================
-
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    delay 
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  delay,
 } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const fs = require('fs');
 const qrcode = require('qrcode-terminal');
 const logger = require('./logger');
-const fs = require('fs');
+const { atomicWriteSync, withTimeout } = require('./utils');
+const { FALLBACK_WA_VERSION, QUEUE_FILE, SESSION_DIR, WA_BROWSER_ID } = require('./constants');
 
-const RESTART_INTERVAL_MS = 60 * 60 * 1000; // Preventive restart every 60 minutes
+const baileysLogger = pino({ level: 'silent' });
+
+const RESTART_INTERVAL_MS = 60 * 60 * 1000;
+const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const SEND_TIMEOUT_MS = 30_000;
+const INITIAL_RECONNECT_DELAY_MS = 2_000;
+const MAX_RECONNECT_DELAY_MS = 60_000;
+const QUEUE_RETRY_INTERVAL_MS = 30_000;
 
 class WhatsAppClient {
-  constructor({ groupId }) {
+  constructor({ groupId, onMessage, onDisconnect }) {
     this.groupId = groupId;
     this.ready = false;
     this.sock = null;
     this._messageQueue = [];
     this._restartTimer = null;
+    this._healthCheckTimer = null;
+    this._queueRetryTimer = null;
     this._restarting = false;
+    this._reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+    this._onMessage = onMessage || null;
+    this._onDisconnect = onDisconnect || null;
+    this._loadQueue();
+  }
+
+  get queueSize() {
+    return this._messageQueue.length;
   }
 
   async initialize() {
-    logger.info('WhatsApp (Baileys): initializing...');
+    logger.info('WhatsApp: initializing...');
     await this._connect();
+
+    const startTime = Date.now();
+    while (!this.ready && Date.now() - startTime < 60_000) {
+      await delay(500);
+    }
+
+    if (!this.ready) {
+      throw new Error('WhatsApp connection timed out (60s)');
+    }
+
+    logger.info('WhatsApp: ready');
   }
 
   async _connect() {
-    // 1. Setup Auth State (Persistence)
-    const { state, saveCreds } = await useMultiFileAuthState('./whatsapp-session-baileys');
+    const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
-    // 2. Initialize Socket
-    // NOTE: version must be kept up to date — WhatsApp rejects outdated versions with 405.
-    // Check https://wppconnect.io/whatsapp-versions/ for the latest tertiary number.
+    let version = FALLBACK_WA_VERSION;
+    try {
+      const result = await fetchLatestBaileysVersion();
+      if (result?.version) {
+        version = result.version;
+        logger.info('WhatsApp: fetched latest version', { version });
+      }
+    } catch {
+      logger.info('WhatsApp: using fallback version', { version });
+    }
+
     this.sock = makeWASocket({
       auth: state,
-      version: [2, 3000, 1034074495],
-      printQRInTerminal: false, // We handle it manually via the 'qr' event equivalent
-      browser: ['Alert Bot', 'Chrome', '1.0.0'],
+      logger: baileysLogger,
+      version,
+      printQRInTerminal: false,
+      browser: WA_BROWSER_ID,
     });
 
-    // 3. Setup Event Handlers
     this.sock.ev.on('creds.update', saveCreds);
 
     this.sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
-      // Handle QR Code
       if (qr) {
         logger.info('WhatsApp: scan QR code');
         qrcode.generate(qr, { small: true });
       }
 
-      // Handle Connection Status
       if (connection === 'close') {
-        const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         this.ready = false;
-        logger.warn('WhatsApp: disconnected', { reason: lastDisconnect?.error });
+        this._cancelHealthCheck();
+        this._cancelQueueRetry();
+
+        logger.warn('WhatsApp: disconnected', { statusCode });
+
+        if (this._onDisconnect) {
+          this._onDisconnect(statusCode, shouldReconnect);
+        }
 
         if (shouldReconnect && !this._restarting) {
-          this._connect();
+          const delayMs = this._reconnectDelay;
+          this._reconnectDelay = Math.min(this._reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+          logger.info(`WhatsApp: reconnecting in ${delayMs}ms`);
+          await delay(delayMs);
+          if (!this._restarting) this._connect();
         }
       } else if (connection === 'open') {
         logger.info('WhatsApp: connected');
         this.ready = true;
+        this._reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
         this._flushQueue();
         this._schedulePreventiveRestart();
-        // await this._sendStartupMessage(); // Yifat asked to remove
+        this._startHealthCheck();
+        this._startQueueRetry();
       }
     });
-  }
 
-  // ------------------------------------------
-  // Startup confirmation
-  // ------------------------------------------
-  async _sendStartupMessage() {
-    if (!this.groupId) return;
-    const now = new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
-    const msg = `🟢 *בוט התרעות פעיל (Baileys) / Alert Bot Online*\n🕐 ${now}`;
-    try {
-      await this.sock.sendMessage(this.groupId, { text: msg });
-      logger.info('WhatsApp: startup message sent');
-    } catch (err) {
-      logger.error('WhatsApp: startup message failed', { error: err.message });
+    if (this._onMessage) {
+      this.sock.ev.on('messages.upsert', async ({ messages }) => {
+        for (const msg of messages) {
+          if (!msg.message || msg.key.fromMe) continue;
+          const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+          if (text) {
+            try {
+              this._onMessage(msg.key.remoteJid, text.trim());
+            } catch (err) {
+              logger.warn('WhatsApp: message handler error', { error: err.message });
+            }
+          }
+        }
+      });
     }
   }
 
-  // ------------------------------------------
-  // Preventive restart — avoids stale sockets
-  // ------------------------------------------
   _schedulePreventiveRestart() {
     this._cancelPreventiveRestart();
     this._restartTimer = setTimeout(() => {
-      logger.info('WhatsApp: preventive restart (scheduled)');
+      logger.info('WhatsApp: preventive restart');
       this._restart();
     }, RESTART_INTERVAL_MS);
   }
@@ -109,18 +152,56 @@ class WhatsAppClient {
     }
   }
 
+  _startHealthCheck() {
+    this._cancelHealthCheck();
+    this._healthCheckTimer = setInterval(async () => {
+      if (!this.ready || !this.sock) return;
+      try {
+        await withTimeout(this.sock.sendPresenceUpdate('available'), 10_000);
+      } catch {
+        logger.warn('WhatsApp: health check failed, triggering restart');
+        this._restart();
+      }
+    }, HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  _cancelHealthCheck() {
+    if (this._healthCheckTimer) {
+      clearInterval(this._healthCheckTimer);
+      this._healthCheckTimer = null;
+    }
+  }
+
+  _startQueueRetry() {
+    this._cancelQueueRetry();
+    this._queueRetryTimer = setInterval(() => {
+      if (this.ready && this._messageQueue.length > 0) {
+        logger.info(`WhatsApp: retrying ${this._messageQueue.length} queued messages`);
+        this._flushQueue();
+      }
+    }, QUEUE_RETRY_INTERVAL_MS);
+  }
+
+  _cancelQueueRetry() {
+    if (this._queueRetryTimer) {
+      clearInterval(this._queueRetryTimer);
+      this._queueRetryTimer = null;
+    }
+  }
+
   async _restart() {
     if (this._restarting) return;
     this._restarting = true;
     this.ready = false;
     this._cancelPreventiveRestart();
+    this._cancelHealthCheck();
+    this._cancelQueueRetry();
 
     logger.info('WhatsApp: restarting socket...');
 
     try {
-      // Baileys doesn't need a heavy destroy, just end the socket
-      this.sock.end(new Error('Preventive Restart'));
-    } catch (err) {
+      this.sock.end(new Error('Restart'));
+    } catch {
       // ignore
     }
 
@@ -134,91 +215,127 @@ class WhatsAppClient {
       setTimeout(() => {
         this._restarting = false;
         this._restart();
-      }, 30000);
+      }, 30_000);
     }
   }
 
-  /**
-   * Send a text message to the configured group.
-   */
   async sendMessage(text) {
     if (!this.groupId) {
-      logger.error('WhatsApp: no group ID configured');
+      logger.error('WhatsApp: no group ID');
       return false;
     }
 
     if (!this.ready) {
-      logger.warn('WhatsApp: not ready, queuing message');
-      this._messageQueue.push({ type: 'text', data: text });
+      this._enqueue({ type: 'text', data: text });
       return false;
     }
 
     try {
-      await this.sock.sendMessage(this.groupId, { text: text });
-      logger.info('WhatsApp: sent text to group');
+      await withTimeout(this.sock.sendMessage(this.groupId, { text }), SEND_TIMEOUT_MS);
       return true;
     } catch (err) {
       logger.error('WhatsApp: send failed', { error: err.message });
-      this._messageQueue.push({ type: 'text', data: text });
+      this._enqueue({ type: 'text', data: text });
       return false;
     }
   }
 
-  /**
-   * Send an image (PNG buffer) to the configured group.
-   * @param {Buffer} imageBuffer - PNG image buffer
-   * @param {string} [caption] - Optional caption text
-   * @returns {boolean} true if sent
-   */
   async sendImage(imageBuffer, caption) {
     if (!this.groupId) {
-      logger.error('WhatsApp: no group ID configured');
+      logger.error('WhatsApp: no group ID');
       return false;
     }
 
     if (!this.ready) {
-      logger.warn('WhatsApp: not ready, queuing image');
-      this._messageQueue.push({ type: 'image', data: imageBuffer, caption });
+      this._enqueue({ type: 'image', data: imageBuffer.toString('base64'), caption });
       return false;
     }
 
     try {
       const msg = { image: imageBuffer, mimetype: 'image/png' };
       if (caption) msg.caption = caption;
-      await this.sock.sendMessage(this.groupId, msg);
-      logger.info('WhatsApp: sent image to group');
+      await withTimeout(this.sock.sendMessage(this.groupId, msg), SEND_TIMEOUT_MS);
       return true;
     } catch (err) {
       logger.error('WhatsApp: image send failed', { error: err.message });
-      this._messageQueue.push({ type: 'image', data: imageBuffer, caption });
+      this._enqueue({ type: 'image', data: imageBuffer.toString('base64'), caption });
       return false;
     }
   }
 
+  async sendRaw(jid, content) {
+    if (!this.ready || !this.sock) return false;
+    try {
+      await withTimeout(this.sock.sendMessage(jid, content), SEND_TIMEOUT_MS);
+      return true;
+    } catch (err) {
+      logger.warn('WhatsApp: raw send failed', { error: err.message, jid });
+      return false;
+    }
+  }
+
+  _enqueue(item) {
+    this._messageQueue.push(item);
+    this._persistQueue();
+  }
+
   async _flushQueue() {
-    while (this._messageQueue.length > 0) {
-      const item = this._messageQueue.shift();
+    while (this._messageQueue.length > 0 && this.ready) {
+      const item = this._messageQueue[0];
       try {
         if (item.type === 'image') {
-          const msg = { image: item.data, mimetype: 'image/png' };
+          const buffer = Buffer.from(item.data, 'base64');
+          const msg = { image: buffer, mimetype: 'image/png' };
           if (item.caption) msg.caption = item.caption;
-          await this.sock.sendMessage(this.groupId, msg);
+          await withTimeout(this.sock.sendMessage(this.groupId, msg), SEND_TIMEOUT_MS);
         } else {
-          await this.sock.sendMessage(this.groupId, { text: item.data });
+          await withTimeout(
+            this.sock.sendMessage(this.groupId, { text: item.data }),
+            SEND_TIMEOUT_MS,
+          );
         }
+        this._messageQueue.shift();
+        this._persistQueue();
         logger.info('WhatsApp: flushed queued message');
         await delay(1000);
       } catch (err) {
-        logger.error('WhatsApp: flush failed', { error: err.message });
-        this._messageQueue.unshift(item);
+        logger.error('WhatsApp: flush failed, will retry', { error: err.message });
         break;
       }
     }
   }
 
+  _persistQueue() {
+    try {
+      atomicWriteSync(QUEUE_FILE, JSON.stringify(this._messageQueue));
+    } catch (err) {
+      logger.error('WhatsApp: queue persistence failed', { error: err.message });
+    }
+  }
+
+  _loadQueue() {
+    try {
+      if (!fs.existsSync(QUEUE_FILE)) return;
+      const data = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
+      if (Array.isArray(data)) {
+        this._messageQueue = data;
+        logger.info('WhatsApp: loaded queued messages', { count: data.length });
+      }
+    } catch (err) {
+      logger.warn('WhatsApp: could not load queue', { error: err.message });
+    }
+  }
+
   async destroy() {
     this._cancelPreventiveRestart();
-    this.sock.end(undefined);
+    this._cancelHealthCheck();
+    this._cancelQueueRetry();
+    this._persistQueue();
+    try {
+      this.sock?.end(undefined);
+    } catch {
+      // ignore
+    }
     logger.info('WhatsApp: destroyed');
   }
 }
