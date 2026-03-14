@@ -42,9 +42,9 @@ let maintenance;
 
 const whatsapp = new WhatsAppClient({
   groupId: config.whatsappGroupId,
-  onMessage: (jid, text) => {
+  onMessage: async (jid, text) => {
     if (config.maintenanceGroupId && jid === config.maintenanceGroupId && maintenance?.enabled) {
-      const response = maintenance.handleCommand(text);
+      const response = await maintenance.handleCommand(text);
       if (response) {
         whatsapp.sendRaw(jid, { text: response }).catch(() => {});
       }
