@@ -1,20 +1,28 @@
 {
   "name": "red-alert-whatsapp",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Israeli Red Alert (Pikud HaOref) to WhatsApp group bot",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "npx pm2 start ecosystem.config.cjs && npx pm2 logs red-alert-whatsapp",
+    "stop": "npx pm2 stop ecosystem.config.cjs",
+    "restart": "npx pm2 restart ecosystem.config.cjs",
+    "status": "npx pm2 status",
     "setup": "node src/setup.js",
-    "test": "node misc/send-mock-alert.js"
+    "test": "node misc/send-mock-alert.js",
+    "format": "npx prettier --write ."
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.16",
     "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "pm2": "^6.0.14",
     "qrcode-terminal": "^0.12.0",
     "sharp": "^0.34.5",
-    "whatsapp-web.js": "^1.26.1",
     "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.5.3"
   },
   "engines": {
     "node": ">=18.0.0"

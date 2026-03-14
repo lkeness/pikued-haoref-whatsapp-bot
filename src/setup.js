@@ -1,18 +1,14 @@
-// ===========================================
-// Setup utility
-// Run this once to find your WhatsApp Group ID.
-// Usage: npm run setup
-// ===========================================
-
 require('dotenv').config();
 
 const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
+  fetchLatestBaileysVersion,
   delay,
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
+const { FALLBACK_WA_VERSION, SESSION_DIR, WA_BROWSER_ID } = require('./constants');
 
 console.log('===========================================');
 console.log('  Red Alert WhatsApp Bot — Setup');
@@ -22,9 +18,6 @@ console.log('This will connect to WhatsApp and list');
 console.log('all your groups so you can find the group ID.');
 console.log('');
 
-// ------------------------------------------
-// Display groups and exit
-// ------------------------------------------
 function displayGroups(groups) {
   if (groups.length === 0) {
     console.log('\n❌ No groups found. Make sure your account has groups.');
@@ -51,17 +44,22 @@ function displayGroups(groups) {
   console.log('===========================================');
 }
 
-// ------------------------------------------
-// Setup
-// ------------------------------------------
 async function setup() {
-  const { state, saveCreds } = await useMultiFileAuthState('./whatsapp-session-baileys');
+  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+
+  let version = FALLBACK_WA_VERSION;
+  try {
+    const result = await fetchLatestBaileysVersion();
+    if (result?.version) version = result.version;
+  } catch {
+    // use fallback
+  }
 
   const sock = makeWASocket({
     auth: state,
-    version: [2, 3000, 1034074495],
+    version,
     printQRInTerminal: false,
-    browser: ['Alert Bot', 'Chrome', '1.0.0'],
+    browser: WA_BROWSER_ID,
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -113,10 +111,7 @@ async function setup() {
         sock.ev.on('messages.upsert', async ({ messages }) => {
           for (const msg of messages) {
             if (!msg.message) continue;
-            const text =
-              msg.message.conversation ||
-              msg.message.extendedTextMessage?.text ||
-              '';
+            const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
             if (text === '!groupid' && msg.key.remoteJid.endsWith('@g.us')) {
               const groupId = msg.key.remoteJid;
               console.log(`\n📌 Group ID detected from message:`);

@@ -1,22 +1,18 @@
-# Dependencies
 node_modules/
 
-# Environment
 .env
-package-lock.json
 
-# WhatsApp sessions
 whatsapp-session/
 whatsapp-session-baileys/
 
-# Logs
+.dedup-state.json
+.message-queue.json
+
 logs/
 
-# OS files
 .DS_Store
 Thumbs.db
 
-# IDE
 .vscode/
 .idea/
 *.swp

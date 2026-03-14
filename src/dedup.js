@@ -1,56 +1,72 @@
-// ===========================================
-// Alert deduplication
-// Prevents the same alert from being sent twice.
-// ===========================================
-
+const fs = require('fs');
 const logger = require('./logger');
+const { DEDUP_STATE_FILE } = require('./constants');
+const { atomicWriteSync } = require('./utils');
 
 class AlertDeduplicator {
   constructor(windowMs = 60000) {
     this.windowMs = windowMs;
-    /** @type {Map<string, number>} alertKey -> timestamp */
+    /** @type {Map<string, number>} */
     this.seen = new Map();
+    this.lastAlertId = null;
+    this._load();
   }
 
-  /**
-   * Generate a dedup key from an alert.
-   * We combine the alert category + sorted city names.
-   */
   makeKey(alert) {
     const cities = (alert.cities || []).slice().sort().join('|');
     return `${alert.cat}::${cities}`;
   }
 
-  /**
-   * Check if this alert has already been seen.
-   * Does NOT mark it as seen — call markSeen() after successful send.
-   * @param {Object} alert - Normalized alert object
-   * @returns {boolean} true if duplicate (should be skipped)
-   */
   isDuplicate(alert) {
     this._cleanup();
-    const key = this.makeKey(alert);
-    if (this.seen.has(key)) {
-      logger.debug(`Duplicate alert skipped: ${key}`);
-      return true;
-    }
-    return false;
+    return this.seen.has(this.makeKey(alert));
   }
 
-  /**
-   * Mark an alert as seen. Call after confirmed send.
-   * @param {Object} alert - Normalized alert object
-   */
   markSeen(alert) {
     const key = this.makeKey(alert);
     this.seen.set(key, Date.now());
+    this._save();
   }
 
-  /** Remove expired entries */
+  setLastAlertId(id) {
+    this.lastAlertId = id;
+    this._save();
+  }
+
   _cleanup() {
     const cutoff = Date.now() - this.windowMs;
     for (const [key, ts] of this.seen) {
       if (ts < cutoff) this.seen.delete(key);
+    }
+  }
+
+  _save() {
+    try {
+      const data = JSON.stringify({
+        lastAlertId: this.lastAlertId,
+        seen: Object.fromEntries(this.seen),
+      });
+      atomicWriteSync(DEDUP_STATE_FILE, data);
+    } catch (err) {
+      logger.error('Dedup: failed to save state', { error: err.message });
+    }
+  }
+
+  _load() {
+    try {
+      if (!fs.existsSync(DEDUP_STATE_FILE)) return;
+      const raw = JSON.parse(fs.readFileSync(DEDUP_STATE_FILE, 'utf8'));
+      this.lastAlertId = raw.lastAlertId || null;
+      const cutoff = Date.now() - this.windowMs;
+      for (const [key, ts] of Object.entries(raw.seen || {})) {
+        if (ts >= cutoff) this.seen.set(key, ts);
+      }
+      logger.info('Dedup: restored state', {
+        lastAlertId: this.lastAlertId,
+        seenCount: this.seen.size,
+      });
+    } catch (err) {
+      logger.warn('Dedup: could not load state, starting fresh', { error: err.message });
     }
   }
 }

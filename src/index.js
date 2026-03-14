@@ -1,44 +1,31 @@
-// ===========================================
-// Red Alert WhatsApp Bot — Main Entry Point
-//
-// Receives alerts from Pikud HaOref,
-// deduplicates, formats, and forwards to a
-// WhatsApp group.
-// ===========================================
-
-require('dotenv').config();
-const fs = require('fs');
+const config = require('./config');
 const logger = require('./logger');
 const { formatAlertMessage } = require('./alertTypes');
 const AlertCategory = require('./alertCategories');
 const { generateAlertImage } = require('./alertImage');
 const AlertDeduplicator = require('./dedup');
 const PikudHaorefSource = require('./pikudHaoref');
-const WhatsAppClient = require('./whatsapp');
+const WhatsAppClient = require('./whatsapp-baileys');
+const MaintenanceChannel = require('./maintenance');
 
-// Ensure logs directory exists
-if (!fs.existsSync('./logs')) fs.mkdirSync('./logs');
-
-// ------------------------------------------
-// Config
-// ------------------------------------------
-const config = {
-  whatsappGroupId: process.env.WHATSAPP_GROUP_ID,
-  pikudHaoref: {
-    pollIntervalMs: parseInt(process.env.PIKUD_HAOREF_POLL_INTERVAL_MS) || 3000,
-  },
-  filterCities: process.env.FILTER_CITIES
-    ? process.env.FILTER_CITIES.split(',').map((c) => c.trim()).filter(Boolean)
-    : [],
-  sendEventEnded: process.env.SEND_EVENT_ENDED !== 'false',
-  dedupWindowMs: parseInt(process.env.DEDUP_WINDOW_MS) || 60000,
+// Suppress libsignal stderr noise (harmless decryption warnings from offline messages)
+const origStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = function (chunk, encoding, callback) {
+  const str = typeof chunk === 'string' ? chunk : chunk.toString();
+  if (
+    str.includes('Bad MAC') ||
+    str.includes('Failed to decrypt') ||
+    str.includes('No matching sessions') ||
+    str.includes('Closing open session in favor')
+  ) {
+    if (typeof callback === 'function') callback();
+    return true;
+  }
+  return origStderrWrite(chunk, encoding, callback);
 };
 
-// ------------------------------------------
-// Validate
-// ------------------------------------------
 if (!config.whatsappGroupId) {
-  logger.error('WHATSAPP_GROUP_ID is not set. Run `npm run setup` to find your group ID, then add it to .env');
+  logger.error('WHATSAPP_GROUP_ID is not set. Run `npm run setup` first, then add it to .env');
   process.exit(1);
 }
 
@@ -46,106 +33,146 @@ logger.info('Starting Red Alert WhatsApp Bot', {
   pollIntervalMs: config.pikudHaoref.pollIntervalMs,
   filterCities: config.filterCities.length > 0 ? config.filterCities : 'ALL',
   groupId: config.whatsappGroupId,
+  maintenanceGroup: config.maintenanceGroupId ? 'configured' : 'none',
 });
 
-// ------------------------------------------
-// Initialize components
-// ------------------------------------------
 const dedup = new AlertDeduplicator(config.dedupWindowMs);
+
+let maintenance;
 
 const whatsapp = new WhatsAppClient({
   groupId: config.whatsappGroupId,
+  onMessage: (jid, text) => {
+    if (config.maintenanceGroupId && jid === config.maintenanceGroupId && maintenance?.enabled) {
+      const response = maintenance.handleCommand(text);
+      if (response) {
+        whatsapp.sendRaw(jid, { text: response }).catch(() => {});
+      }
+    }
+  },
+  onDisconnect: (statusCode, willRetry) => {
+    if (maintenance) {
+      maintenance.sendReconnection(statusCode, willRetry).catch(() => {});
+    }
+  },
 });
 
-// ------------------------------------------
-// Central alert handler
-// ------------------------------------------
+maintenance = new MaintenanceChannel({
+  whatsapp,
+  groupId: config.maintenanceGroupId,
+});
+
 async function handleAlert(alert) {
-  // Suppress "event ended" (cat 13) if configured
   if (alert.cat === AlertCategory.EVENT_ENDED && !config.sendEventEnded) {
     return;
   }
 
-  // City filtering
-  if (config.filterCities.length > 0 && alert.cities && alert.cities.length > 0) {
+  const totalCities = alert.cities?.length || 0;
+
+  if (config.filterCities.length > 0 && alert.cities && totalCities > 0) {
     const matchingCities = alert.cities.filter((city) =>
-      config.filterCities.some((filter) => city === filter)
+      config.filterCities.some((filter) => city === filter),
     );
-    if (matchingCities.length === 0) {
-      return;
-    }
+    if (matchingCities.length === 0) return;
     alert.cities = matchingCities;
   }
 
-  // At this point the alert matched our cities — always log this
-  logger.info(`⚠ MATCHED ALERT: cat=${alert.cat} "${alert.title}" → ${alert.cities.join(', ')}`, {
-    id: alert.raw?.id,
-    cat: alert.cat,
-    title: alert.title,
-  });
+  logger.info(
+    `⚠ ALERT: cat=${alert.cat} "${alert.title}" (${alert.cities?.length || 0}/${totalCities} cities)`,
+    { id: alert.raw?.id, cat: alert.cat, title: alert.title },
+  );
 
-  // Dedup check (don't mark as seen yet)
   if (dedup.isDuplicate(alert)) {
-    logger.info('↑ duplicate, skipping');
+    logger.info('Duplicate, skipping');
     return;
   }
 
-  // Generate alert image and send
   let sent;
   try {
     const imageBuffer = await generateAlertImage(alert);
     sent = await whatsapp.sendImage(imageBuffer);
   } catch (err) {
-    // Fallback to text message if image generation fails
-    logger.warn('Image generation failed, falling back to text', { error: err.message });
+    logger.warn('Image failed, sending text', { error: err.message });
     const message = formatAlertMessage(alert);
     sent = await whatsapp.sendMessage(message);
   }
 
   if (sent) {
     dedup.markSeen(alert);
-    logger.info('✓ alert sent to WhatsApp');
+    logger.info('Alert delivered');
+    maintenance.recordAlertSent();
   } else {
-    logger.warn('✗ alert NOT sent — queued, will retry on next poll');
+    logger.warn('Alert queued for retry');
   }
 }
 
-// ------------------------------------------
-// Start alert source
-// ------------------------------------------
-const pikudSource = new PikudHaorefSource({
-  pollIntervalMs: config.pikudHaoref.pollIntervalMs,
-  onAlert: handleAlert,
-});
-pikudSource.start();
+let pikudSource = null;
 
-// ------------------------------------------
-// Start WhatsApp
-// ------------------------------------------
-whatsapp.initialize().catch((err) => {
-  logger.error('Failed to initialize WhatsApp', { error: err.message });
-  process.exit(1);
-});
+async function start() {
+  try {
+    await whatsapp.initialize();
+  } catch (err) {
+    logger.error('Failed to connect WhatsApp', { error: err.message });
+    await maintenance.sendError('Startup failed', err).catch(() => {});
+    process.exit(1);
+  }
 
-// ------------------------------------------
-// Graceful shutdown
-// ------------------------------------------
-function shutdown(signal) {
+  await maintenance.sendStartup(config);
+  maintenance.startPeriodicStatus(config.maintenanceStatusIntervalMs);
+
+  pikudSource = new PikudHaorefSource({
+    pollIntervalMs: config.pikudHaoref.pollIntervalMs,
+    onAlert: handleAlert,
+    onAlertIdChange: (id) => dedup.setLastAlertId(id),
+    onPoll: () => maintenance.recordPoll(),
+    lastAlertId: dedup.lastAlertId,
+  });
+  pikudSource.start();
+
+  logger.info('Bot is running. Waiting for alerts...');
+}
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info(`Received ${signal}, shutting down...`);
-  pikudSource.stop();
-  whatsapp.destroy().then(() => {
-    logger.info('Shutdown complete');
-    process.exit(0);
-  }).catch(() => process.exit(1));
+
+  if (pikudSource) pikudSource.stop();
+  maintenance.stopPeriodicStatus();
+  await maintenance.sendShutdown(signal).catch(() => {});
+
+  try {
+    await whatsapp.destroy();
+  } catch {
+    // ignore
+  }
+
+  logger.info('Shutdown complete');
+  process.exit(0);
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception', { error: err.message, stack: err.stack });
-});
-process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled rejection', { reason: reason?.toString() });
+  whatsapp._persistQueue();
+  maintenance
+    .sendError('Uncaught exception', err)
+    .catch(() => {})
+    .finally(() => process.exit(1));
+  setTimeout(() => process.exit(1), 3000);
 });
 
-logger.info('Bot is running. Waiting for alerts...');
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled rejection', { reason: reason?.toString() });
+  whatsapp._persistQueue();
+  maintenance
+    .sendError('Unhandled rejection', { message: reason?.toString() })
+    .catch(() => {})
+    .finally(() => process.exit(1));
+  setTimeout(() => process.exit(1), 3000);
+});
+
+start();
