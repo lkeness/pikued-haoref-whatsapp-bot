@@ -1,7 +1,6 @@
 const config = require('./config');
 const logger = require('./logger');
-const { formatAlertMessage } = require('./alertTypes');
-const AlertCategory = require('./alertCategories');
+const { formatAlertMessage, isReleaseMessage } = require('./alertTypes');
 const { generateAlertImage } = require('./alertImage');
 const AlertDeduplicator = require('./dedup');
 const PikudHaorefSource = require('./pikudHaoref');
@@ -63,7 +62,7 @@ maintenance = new MaintenanceChannel({
 });
 
 async function handleAlert(alert) {
-  if (alert.cat === AlertCategory.EVENT_ENDED && !config.sendEventEnded) {
+  if (isReleaseMessage(alert) && !config.sendEventEnded) {
     return;
   }
 

@@ -1,9 +1,11 @@
 const { translateCities, translateInstruction } = require('./translate');
 const { formatTimestamp } = require('./utils');
+const { AlertCategory } = require('./alertCategories');
 
 const RELEASE_KEYWORDS = ['יכולים לצאת', 'ניתן לצאת', 'לחזור לשגרה', 'הסתיים', 'סיום'];
 
 function isReleaseMessage(alert) {
+  if (alert.cat !== AlertCategory.HFC_UPDATE) return false;
   const textToScan = [alert.title || '', alert.instructions || ''].join(' ');
   return RELEASE_KEYWORDS.some((kw) => textToScan.includes(kw));
 }
