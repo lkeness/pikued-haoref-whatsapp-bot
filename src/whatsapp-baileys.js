@@ -121,16 +121,20 @@ class WhatsAppClient {
     });
 
     if (this._onMessage) {
-      this.sock.ev.on('messages.upsert', async ({ messages }) => {
+      this.sock.ev.on('messages.upsert', ({ messages }) => {
         for (const msg of messages) {
           if (!msg.message || msg.key.fromMe) continue;
           const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
           if (text) {
-            try {
-              this._onMessage(msg.key.remoteJid, text.trim());
-            } catch (err) {
-              logger.warn('WhatsApp: message handler error', { error: err.message });
-            }
+            const jid = msg.key.remoteJid;
+            const trimmed = text.trim();
+            setImmediate(() => {
+              try {
+                this._onMessage(jid, trimmed);
+              } catch (err) {
+                logger.debug('WhatsApp: message handler error', { error: err.message });
+              }
+            });
           }
         }
       });
@@ -141,7 +145,7 @@ class WhatsAppClient {
     this._cancelPreventiveRestart();
     this._restartTimer = setTimeout(() => {
       logger.info('WhatsApp: preventive restart');
-      this._restart();
+      this.restart();
     }, RESTART_INTERVAL_MS);
   }
 
@@ -160,7 +164,7 @@ class WhatsAppClient {
         await withTimeout(this.sock.sendPresenceUpdate('available'), 10_000);
       } catch {
         logger.warn('WhatsApp: health check failed, triggering restart');
-        this._restart();
+        this.restart();
       }
     }, HEALTH_CHECK_INTERVAL_MS);
   }
@@ -189,7 +193,7 @@ class WhatsAppClient {
     }
   }
 
-  async _restart() {
+  restart() {
     if (this._restarting) return;
     this._restarting = true;
     this.ready = false;
@@ -205,18 +209,24 @@ class WhatsAppClient {
       // ignore
     }
 
-    await delay(3000);
-
-    try {
-      await this._connect();
-      this._restarting = false;
-    } catch (err) {
-      logger.error('WhatsApp: restart failed, retrying in 30s', { error: err.message });
-      setTimeout(() => {
+    delay(3000).then(async () => {
+      try {
+        await this._connect();
         this._restarting = false;
-        this._restart();
-      }, 30_000);
-    }
+      } catch (err) {
+        logger.error('WhatsApp: restart failed, retrying in 30s', { error: err.message });
+        setTimeout(() => {
+          this._restarting = false;
+          this.restart();
+        }, 30_000);
+      }
+    });
+  }
+
+  clearQueue() {
+    this._messageQueue = [];
+    this._persistQueue();
+    logger.info('WhatsApp: queue cleared');
   }
 
   async sendMessage(text) {

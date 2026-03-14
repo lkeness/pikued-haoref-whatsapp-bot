@@ -37,29 +37,29 @@ logger.info('Starting Red Alert WhatsApp Bot', {
 
 const dedup = new AlertDeduplicator(config.dedupWindowMs);
 
-let maintenance;
-
 const whatsapp = new WhatsAppClient({
   groupId: config.whatsappGroupId,
-  onMessage: async (jid, text) => {
-    if (config.maintenanceGroupId && jid === config.maintenanceGroupId && maintenance?.enabled) {
-      const response = await maintenance.handleCommand(text);
-      if (response) {
-        whatsapp.sendRaw(jid, { text: response }).catch(() => {});
-      }
+  onMessage: (jid, text) => {
+    if (config.maintenanceGroupId && jid === config.maintenanceGroupId && maintenance.enabled) {
+      maintenance
+        .handleCommand(text)
+        .then((response) => {
+          if (response) whatsapp.sendRaw(jid, { text: response }).catch(() => {});
+        })
+        .catch(() => {});
     }
   },
   onDisconnect: (statusCode, willRetry) => {
-    if (maintenance) {
-      maintenance.sendReconnection(statusCode, willRetry).catch(() => {});
-    }
+    maintenance.notifyReconnection(statusCode, willRetry);
   },
 });
 
-maintenance = new MaintenanceChannel({
+const maintenance = new MaintenanceChannel({
   whatsapp,
   groupId: config.maintenanceGroupId,
 });
+
+maintenance.setDeps({ dedup, config });
 
 async function handleAlert(alert) {
   if (isReleaseMessage(alert) && !config.sendEventEnded) {
@@ -102,6 +102,7 @@ async function handleAlert(alert) {
     maintenance.recordAlertSent();
   } else {
     logger.warn('Alert queued for retry');
+    maintenance.recordAlertFailed();
   }
 }
 
@@ -112,11 +113,11 @@ async function start() {
     await whatsapp.initialize();
   } catch (err) {
     logger.error('Failed to connect WhatsApp', { error: err.message });
-    await maintenance.sendError('Startup failed', err).catch(() => {});
+    maintenance.notifyError('Startup failed', err);
     process.exit(1);
   }
 
-  await maintenance.sendStartup(config);
+  maintenance.notifyStartup(config);
   maintenance.startPeriodicStatus(config.maintenanceStatusIntervalMs);
 
   pikudSource = new PikudHaorefSource({
@@ -127,6 +128,7 @@ async function start() {
     lastAlertId: dedup.lastAlertId,
   });
   pikudSource.start();
+  maintenance.setDeps({ pikudSource });
 
   logger.info('Bot is running. Waiting for alerts...');
 }
@@ -139,7 +141,12 @@ async function shutdown(signal) {
 
   if (pikudSource) pikudSource.stop();
   maintenance.stopPeriodicStatus();
-  await maintenance.sendShutdown(signal).catch(() => {});
+
+  try {
+    await maintenance.notifyShutdown(signal);
+  } catch {
+    // best-effort — don't let maintenance block shutdown
+  }
 
   try {
     await whatsapp.destroy();
@@ -157,20 +164,14 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception', { error: err.message, stack: err.stack });
   whatsapp._persistQueue();
-  maintenance
-    .sendError('Uncaught exception', err)
-    .catch(() => {})
-    .finally(() => process.exit(1));
+  maintenance.notifyError('Uncaught exception', err);
   setTimeout(() => process.exit(1), 3000);
 });
 
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled rejection', { reason: reason?.toString() });
   whatsapp._persistQueue();
-  maintenance
-    .sendError('Unhandled rejection', { message: reason?.toString() })
-    .catch(() => {})
-    .finally(() => process.exit(1));
+  maintenance.notifyError('Unhandled rejection', { message: reason?.toString() });
   setTimeout(() => process.exit(1), 3000);
 });
 

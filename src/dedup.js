@@ -33,6 +33,12 @@ class AlertDeduplicator {
     this._save();
   }
 
+  clear() {
+    this.seen.clear();
+    this._save();
+    logger.info('Dedup: state cleared');
+  }
+
   _cleanup() {
     const cutoff = Date.now() - this.windowMs;
     for (const [key, ts] of this.seen) {
