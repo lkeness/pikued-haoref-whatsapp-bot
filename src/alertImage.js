@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { isReleaseMessage } = require('./alertTypes');
-const AlertCategory = require('./alertCategories');
+const { AlertCategory } = require('./alertCategories');
 const { formatDateParts } = require('./utils');
 
 const PIKUD_LOGO_B64 = fs
@@ -45,18 +45,14 @@ const COLORS = {
 };
 
 function getColors(alert) {
-  if (alert.cat === AlertCategory.EVENT_ENDED) return COLORS.eventEnded;
-  if (alert.cat === AlertCategory.NEWS_FLASH) {
+  if (alert.cat === AlertCategory.HFC_UPDATE) {
     return isReleaseMessage(alert) ? COLORS.eventEnded : COLORS.newsFlash;
   }
   return COLORS.active;
 }
 
 function isEventEndedStyle(alert) {
-  return (
-    alert.cat === AlertCategory.EVENT_ENDED ||
-    (alert.cat === AlertCategory.NEWS_FLASH && isReleaseMessage(alert))
-  );
+  return alert.cat === AlertCategory.HFC_UPDATE && isReleaseMessage(alert);
 }
 
 function arcPath(cx, cy, r, startAngle, endAngle) {
@@ -90,11 +86,7 @@ function iconExclamation(cx, cy, color) {
 }
 
 function getIcon(alert, cx, cy, color) {
-  if (
-    alert.cat === AlertCategory.EVENT_ENDED ||
-    alert.cat === AlertCategory.PRE_ALERT ||
-    alert.cat === AlertCategory.NEWS_FLASH
-  ) {
+  if (alert.cat === AlertCategory.HFC_UPDATE) {
     return iconExclamation(cx, cy, color);
   }
   return iconBroadcast(cx, cy, color);

@@ -1,5 +1,6 @@
 const https = require('https');
 const logger = require('./logger');
+const { historyCatToLiveCat } = require('./alertCategories');
 
 const ALERTS_URL = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
 const HISTORY_URL = 'https://www.oref.org.il/WarningMessages/History/AlertsHistory.json';
@@ -98,7 +99,7 @@ class PikudHaorefSource {
       if (isRecent) {
         const normalized = {
           id: historyId,
-          cat: String(latest.category),
+          cat: historyCatToLiveCat(latest.category),
           title: latest.title || '',
           cities: latest.data ? [latest.data] : [],
           instructions: latest.desc || '',
