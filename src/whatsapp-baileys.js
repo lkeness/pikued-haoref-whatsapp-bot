@@ -263,6 +263,17 @@ class WhatsAppClient {
     }
   }
 
+  async listGroups() {
+    if (!this.ready || !this.sock) return [];
+    try {
+      const groupData = await withTimeout(this.sock.groupFetchAllParticipating(), SEND_TIMEOUT_MS);
+      return Object.values(groupData).map((g) => ({ name: g.subject, id: g.id }));
+    } catch (err) {
+      logger.warn('WhatsApp: failed to list groups', { error: err.message });
+      return [];
+    }
+  }
+
   async sendRaw(jid, content) {
     if (!this.ready || !this.sock) return false;
     try {

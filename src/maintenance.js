@@ -94,7 +94,7 @@ class MaintenanceChannel {
     await this._send(this._formatStatus());
   }
 
-  handleCommand(text) {
+  async handleCommand(text) {
     const cmd = text.trim().toLowerCase();
     if (cmd === 'status' || cmd === '!status') {
       return this._formatStatus();
@@ -102,16 +102,32 @@ class MaintenanceChannel {
     if (cmd === 'ping' || cmd === '!ping') {
       return '🏓 Pong!';
     }
+    if (cmd === 'groups' || cmd === '!groups') {
+      return await this._listGroups();
+    }
     if (cmd === 'help' || cmd === '!help') {
       return [
         '📖 *Available Commands*',
         '',
-        '• status / !status — Full status report',
-        '• ping / !ping — Check if bot is alive',
-        '• help / !help — This message',
+        '• status — Full status report',
+        '• ping — Check if bot is alive',
+        '• groups — List all WhatsApp groups + IDs',
+        '• help — This message',
       ].join('\n');
     }
     return null;
+  }
+
+  async _listGroups() {
+    const groups = await this.whatsapp.listGroups();
+    if (groups.length === 0) {
+      return '❌ Could not fetch groups (disconnected or timeout)';
+    }
+    const lines = [`📋 *Groups (${groups.length})*`, ''];
+    for (const g of groups) {
+      lines.push(`• *${g.name}*`, `  ${g.id}`, '');
+    }
+    return lines.join('\n');
   }
 
   startPeriodicStatus(intervalMs) {
