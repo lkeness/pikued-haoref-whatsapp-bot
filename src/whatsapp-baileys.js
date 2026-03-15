@@ -42,6 +42,7 @@ class WhatsAppClient {
     this._maxQueueAgeMs = maxQueueAgeMs;
     this._sendMutex = createMutex();
     this._flushing = false;
+    this._connectedAt = 0;
     this._loadQueue();
   }
 
@@ -100,11 +101,13 @@ class WhatsAppClient {
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const uptime = this._connectedAt ? Date.now() - this._connectedAt : 0;
         this.ready = false;
+        this._connectedAt = 0;
         this._cancelHealthCheck();
         this._cancelQueueRetry();
 
-        logger.warn('WhatsApp: disconnected', { statusCode });
+        logger.warn('WhatsApp: disconnected', { statusCode, uptimeMs: uptime });
 
         if (this._onDisconnect) {
           try {
@@ -115,6 +118,9 @@ class WhatsAppClient {
         }
 
         if (shouldReconnect) {
+          if (uptime > 30_000) {
+            this._reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+          }
           const delayMs = this._reconnectDelay;
           this._reconnectDelay = Math.min(this._reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
           logger.info(`WhatsApp: reconnecting in ${delayMs}ms`);
@@ -124,7 +130,7 @@ class WhatsAppClient {
       } else if (connection === 'open') {
         logger.info('WhatsApp: connected');
         this.ready = true;
-        this._reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+        this._connectedAt = Date.now();
         this._flushQueue();
         this._startHealthCheck();
         this._startQueueRetry();
