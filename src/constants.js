@@ -8,6 +8,7 @@ const LOGS_DIR = path.resolve(__dirname, '../logs');
 const WA_BROWSER_ID = ['Alert Bot', 'Chrome', '1.0.0'];
 const TIMEZONE = 'Asia/Jerusalem';
 const LOCALE = 'he-IL';
+const MAX_CITIES_DISPLAY = 15;
 
 module.exports = {
   FALLBACK_WA_VERSION,
@@ -18,4 +19,5 @@ module.exports = {
   WA_BROWSER_ID,
   TIMEZONE,
   LOCALE,
+  MAX_CITIES_DISPLAY,
 };

@@ -8,7 +8,9 @@
     "stop": "npx pm2 stop ecosystem.config.cjs",
     "restart": "npx pm2 restart ecosystem.config.cjs",
     "status": "npx pm2 status",
+    "flush-logs": "npx pm2 flush red-alert-whatsapp",
     "setup": "node src/setup.js",
+    "setup:logs": "npx pm2 install pm2-logrotate && npx pm2 set pm2-logrotate:max_size 50M && npx pm2 set pm2-logrotate:retain 3 && npx pm2 set pm2-logrotate:compress true",
     "test": "node misc/send-mock-alert.js",
     "format": "npx prettier --write ."
   },
