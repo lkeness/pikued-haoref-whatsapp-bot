@@ -6,6 +6,7 @@ const AlertDeduplicator = require('./dedup');
 const PikudHaorefSource = require('./pikudHaoref');
 const WhatsAppClient = require('./whatsapp-baileys');
 const MaintenanceChannel = require('./maintenance');
+const alertMetadata = require('./alertMetadata');
 const { createMutex } = require('./utils');
 
 const STDERR_NOISE_PATTERNS = [
@@ -120,6 +121,8 @@ async function handleAlert(alert) {
 let pikudSource = null;
 
 async function start() {
+  await alertMetadata.load();
+
   try {
     await whatsapp.initialize();
   } catch (err) {
@@ -153,6 +156,7 @@ async function shutdown(signal) {
   logger.info(`Received ${signal}, shutting down...`);
 
   if (pikudSource) pikudSource.stop();
+  alertMetadata.stop();
   maintenance.stopPeriodicStatus();
 
   try {

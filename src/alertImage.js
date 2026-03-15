@@ -1,8 +1,7 @@
 const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
-const { isReleaseMessage } = require('./alertTypes');
-const { AlertCategory } = require('./alertCategories');
+const { isReleaseMessage, isHfcUpdate } = require('./alertTypes');
 const { formatDateParts } = require('./utils');
 const { MAX_CITIES_DISPLAY } = require('./constants');
 
@@ -45,14 +44,14 @@ const COLORS = {
 };
 
 function getColors(alert) {
-  if (alert.cat === AlertCategory.HFC_UPDATE) {
+  if (isHfcUpdate(alert)) {
     return isReleaseMessage(alert) ? COLORS.eventEnded : COLORS.newsFlash;
   }
   return COLORS.active;
 }
 
 function isEventEndedStyle(alert) {
-  return alert.cat === AlertCategory.HFC_UPDATE && isReleaseMessage(alert);
+  return isHfcUpdate(alert) && isReleaseMessage(alert);
 }
 
 function arcPath(cx, cy, r, startAngle, endAngle) {
@@ -86,7 +85,7 @@ function iconExclamation(cx, cy, color) {
 }
 
 function getIcon(alert, cx, cy, color) {
-  if (alert.cat === AlertCategory.HFC_UPDATE) {
+  if (isHfcUpdate(alert)) {
     return iconExclamation(cx, cy, color);
   }
   return iconBroadcast(cx, cy, color);
