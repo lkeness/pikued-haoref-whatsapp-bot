@@ -8,18 +8,7 @@ const WhatsAppClient = require('./whatsapp-baileys');
 const MaintenanceChannel = require('./maintenance');
 const alertMetadata = require('./alertMetadata');
 const { createMutex } = require('./utils');
-
-const STDERR_NOISE_PATTERNS = [
-  'Bad MAC',
-  'Failed to decrypt',
-  'No matching sessions',
-  'Closing open session',
-  'Session error',
-  'decryptGroupSignalProto',
-  'pre-key',
-  'prekey',
-  'senderKeyMessage',
-];
+const { STDERR_NOISE_PATTERNS, CRASH_EXIT_DELAY_MS } = require('./constants');
 
 const origStderrWrite = process.stderr.write.bind(process.stderr);
 process.stderr.write = function (chunk, encoding, callback) {
@@ -190,7 +179,7 @@ process.on('uncaughtException', (err) => {
   } catch {
     /* best-effort */
   }
-  setTimeout(() => process.exit(1), 3000);
+  setTimeout(() => process.exit(1), CRASH_EXIT_DELAY_MS);
 });
 
 process.on('unhandledRejection', (reason) => {

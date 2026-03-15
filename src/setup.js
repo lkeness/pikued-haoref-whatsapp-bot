@@ -8,7 +8,7 @@ const {
   delay,
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
-const { FALLBACK_WA_VERSION, SESSION_DIR, WA_BROWSER_ID } = require('./constants');
+const { FALLBACK_WA_VERSION, SESSION_DIR, WA_BROWSER_ID, SETUP_DELAY_MS } = require('./constants');
 
 console.log('===========================================');
 console.log('  Red Alert WhatsApp Bot — Setup');
@@ -79,7 +79,7 @@ async function setup() {
         process.exit(1);
       } else {
         console.log(`⚠️  Connection closed (${statusCode}), reconnecting...`);
-        await delay(3000);
+        await delay(SETUP_DELAY_MS);
         setup();
       }
       return;
@@ -90,7 +90,7 @@ async function setup() {
       console.log('⏳ Fetching groups...\n');
 
       try {
-        await delay(3000);
+        await delay(SETUP_DELAY_MS);
 
         const groupData = await sock.groupFetchAllParticipating();
         const groups = Object.values(groupData).map((g) => ({

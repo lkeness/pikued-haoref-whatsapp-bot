@@ -1,6 +1,5 @@
 const { formatDateParts } = require('./utils');
-const { HFC_UPDATE_CAT } = require('./alertCategories');
-const { MAX_CITIES_DISPLAY } = require('./constants');
+const { MAX_CITIES_DISPLAY, HFC_UPDATE_CAT } = require('./constants');
 const alertMetadata = require('./alertMetadata');
 
 function isReleaseMessage(alert) {
@@ -8,7 +7,11 @@ function isReleaseMessage(alert) {
 }
 
 function isHfcUpdate(alert) {
-  return String(alert.cat) === HFC_UPDATE_CAT;
+  return Number(alert.cat) === HFC_UPDATE_CAT;
+}
+
+function historyCatToLiveCat(historyCat) {
+  return alertMetadata.historyCatToLiveCat(historyCat);
 }
 
 function formatCityList(cities) {
@@ -39,4 +42,10 @@ function formatAlertMessage(alert) {
   return lines.join('\n');
 }
 
-module.exports = { isReleaseMessage, isHfcUpdate, formatAlertMessage, formatCityList };
+module.exports = {
+  isReleaseMessage,
+  isHfcUpdate,
+  historyCatToLiveCat,
+  formatAlertMessage,
+  formatCityList,
+};

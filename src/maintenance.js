@@ -1,7 +1,6 @@
 const logger = require('./logger');
 const { formatTimestamp } = require('./utils');
-
-const MIN_SEND_INTERVAL_MS = 2_000;
+const { MAINTENANCE_MIN_SEND_INTERVAL_MS } = require('./constants');
 
 class MaintenanceChannel {
   constructor({ whatsapp, groupId }) {
@@ -322,8 +321,8 @@ class MaintenanceChannel {
     this._draining = true;
     while (this._sendQueue.length > 0) {
       const elapsed = Date.now() - this._lastSendAt;
-      if (elapsed < MIN_SEND_INTERVAL_MS) {
-        await new Promise((r) => setTimeout(r, MIN_SEND_INTERVAL_MS - elapsed));
+      if (elapsed < MAINTENANCE_MIN_SEND_INTERVAL_MS) {
+        await new Promise((r) => setTimeout(r, MAINTENANCE_MIN_SEND_INTERVAL_MS - elapsed));
       }
       const text = this._sendQueue.shift();
       await this._sendDirect(text);

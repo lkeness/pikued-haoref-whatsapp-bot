@@ -10,15 +10,23 @@ const fs = require('fs');
 const qrcode = require('qrcode-terminal');
 const logger = require('./logger');
 const { atomicWriteSync, withTimeout, createMutex } = require('./utils');
-const { FALLBACK_WA_VERSION, QUEUE_FILE, SESSION_DIR, WA_BROWSER_ID } = require('./constants');
+const {
+  FALLBACK_WA_VERSION,
+  QUEUE_FILE,
+  SESSION_DIR,
+  WA_BROWSER_ID,
+  HEALTH_CHECK_INTERVAL_MS,
+  HEALTH_CHECK_TIMEOUT_MS,
+  SEND_TIMEOUT_MS,
+  INITIAL_RECONNECT_DELAY_MS,
+  MAX_RECONNECT_DELAY_MS,
+  QUEUE_RETRY_INTERVAL_MS,
+  QUEUE_FLUSH_DELAY_MS,
+  CONNECTION_TIMEOUT_MS,
+  CONNECTION_POLL_MS,
+} = require('./constants');
 
 const baileysLogger = pino({ level: 'silent' });
-
-const HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000;
-const SEND_TIMEOUT_MS = 30_000;
-const INITIAL_RECONNECT_DELAY_MS = 2_000;
-const MAX_RECONNECT_DELAY_MS = 60_000;
-const QUEUE_RETRY_INTERVAL_MS = 30_000;
 
 class WhatsAppClient {
   constructor({ groupId, onMessage, onDisconnect, maxQueueAgeMs = 180_000 }) {
@@ -46,12 +54,12 @@ class WhatsAppClient {
     await this._connect();
 
     const startTime = Date.now();
-    while (!this.ready && Date.now() - startTime < 60_000) {
-      await delay(500);
+    while (!this.ready && Date.now() - startTime < CONNECTION_TIMEOUT_MS) {
+      await delay(CONNECTION_POLL_MS);
     }
 
     if (!this.ready) {
-      throw new Error('WhatsApp connection timed out (60s)');
+      throw new Error(`WhatsApp connection timed out (${CONNECTION_TIMEOUT_MS / 1000}s)`);
     }
 
     logger.info('WhatsApp: ready');
@@ -156,7 +164,7 @@ class WhatsAppClient {
     this._healthCheckTimer = setInterval(async () => {
       if (!this.ready || !this.sock) return;
       try {
-        await withTimeout(this.sock.sendPresenceUpdate('available'), 10_000);
+        await withTimeout(this.sock.sendPresenceUpdate('available'), HEALTH_CHECK_TIMEOUT_MS);
       } catch {
         logger.warn('WhatsApp: health check failed, triggering reconnect');
         this._triggerReconnect();
@@ -309,7 +317,7 @@ class WhatsAppClient {
           this._messageQueue.shift();
           this.persistQueue();
           logger.info('WhatsApp: flushed queued message');
-          await delay(1000);
+          await delay(QUEUE_FLUSH_DELAY_MS);
         } else {
           logger.error('WhatsApp: flush failed, will retry later');
           break;

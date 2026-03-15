@@ -1,21 +1,15 @@
 const https = require('https');
 const fs = require('fs');
-const path = require('path');
 const logger = require('./logger');
-
-const TRANSLATIONS_URL = 'https://www.oref.org.il/alerts/alertsTranslation.json';
-const CACHE_FILE = path.resolve(__dirname, '../.alert-metadata-cache.json');
-const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
-const REQUEST_HEADERS = {
-  Accept: 'application/json',
-  'Accept-Language': 'he',
-  'X-Requested-With': 'XMLHttpRequest',
-  Referer: 'https://www.oref.org.il/',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-};
-
-const HFC_RELEASE_CAT_ID = 13;
+const {
+  OREF_TRANSLATIONS_URL,
+  ALERT_METADATA_CACHE_FILE,
+  METADATA_REFRESH_INTERVAL_MS,
+  OREF_REQUEST_HEADERS,
+  METADATA_HTTP_TIMEOUT_MS,
+  HFC_UPDATE_CAT,
+  HFC_RELEASE_CAT_ID,
+} = require('./constants');
 
 class AlertMetadata {
   constructor() {
@@ -56,7 +50,7 @@ class AlertMetadata {
     for (const entry of entries) {
       const { catId, matrixCatId, hebTitle } = entry;
 
-      if (matrixCatId === 10 && hebTitle) {
+      if (matrixCatId === HFC_UPDATE_CAT && hebTitle) {
         if (catId === HFC_RELEASE_CAT_ID) {
           releaseCandidates.add(hebTitle);
         } else {
@@ -105,7 +99,7 @@ class AlertMetadata {
       } catch (err) {
         logger.warn('AlertMetadata: refresh failed', { error: err.message });
       }
-    }, REFRESH_INTERVAL_MS);
+    }, METADATA_REFRESH_INTERVAL_MS);
   }
 
   stop() {
@@ -117,13 +111,13 @@ class AlertMetadata {
 
   _fetchFromApi() {
     return new Promise((resolve) => {
-      const parsedUrl = new URL(TRANSLATIONS_URL);
+      const parsedUrl = new URL(OREF_TRANSLATIONS_URL);
       const options = {
         hostname: parsedUrl.hostname,
         path: parsedUrl.pathname,
         method: 'GET',
-        headers: REQUEST_HEADERS,
-        timeout: 10000,
+        headers: OREF_REQUEST_HEADERS,
+        timeout: METADATA_HTTP_TIMEOUT_MS,
       };
 
       const req = https.request(options, (res) => {
@@ -163,8 +157,8 @@ class AlertMetadata {
 
   _loadCache() {
     try {
-      if (!fs.existsSync(CACHE_FILE)) return null;
-      return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+      if (!fs.existsSync(ALERT_METADATA_CACHE_FILE)) return null;
+      return JSON.parse(fs.readFileSync(ALERT_METADATA_CACHE_FILE, 'utf8'));
     } catch {
       return null;
     }
@@ -172,7 +166,7 @@ class AlertMetadata {
 
   _saveCache(data) {
     try {
-      fs.writeFileSync(CACHE_FILE, JSON.stringify(data));
+      fs.writeFileSync(ALERT_METADATA_CACHE_FILE, JSON.stringify(data));
     } catch (err) {
       logger.warn('AlertMetadata: cache save failed', { error: err.message });
     }
