@@ -1,13 +1,14 @@
 const { formatDateParts } = require('./utils');
-const { AlertCategory } = require('./alertCategories');
+const { HFC_UPDATE_CAT } = require('./alertCategories');
 const { MAX_CITIES_DISPLAY } = require('./constants');
-
-const RELEASE_KEYWORDS = ['יכולים לצאת', 'ניתן לצאת', 'לחזור לשגרה', 'הסתיים', 'סיום'];
+const alertMetadata = require('./alertMetadata');
 
 function isReleaseMessage(alert) {
-  if (alert.cat !== AlertCategory.HFC_UPDATE) return false;
-  const textToScan = [alert.title || '', alert.instructions || ''].join(' ');
-  return RELEASE_KEYWORDS.some((kw) => textToScan.includes(kw));
+  return alertMetadata.isRelease(alert);
+}
+
+function isHfcUpdate(alert) {
+  return String(alert.cat) === HFC_UPDATE_CAT;
 }
 
 function formatCityList(cities) {
@@ -38,4 +39,4 @@ function formatAlertMessage(alert) {
   return lines.join('\n');
 }
 
-module.exports = { isReleaseMessage, formatAlertMessage, formatCityList };
+module.exports = { isReleaseMessage, isHfcUpdate, formatAlertMessage, formatCityList };
