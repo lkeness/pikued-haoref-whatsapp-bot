@@ -13,17 +13,30 @@ const REQUEST_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 };
 
+const HISTORY_POLL_INTERVAL_MS = 10_000;
+const MAX_BACKOFF_MS = 60_000;
+
 class PikudHaorefSource {
-  constructor({ pollIntervalMs = 3000, onAlert, onAlertIdChange, onPoll, lastAlertId = null }) {
+  constructor({
+    pollIntervalMs = 3000,
+    onAlert,
+    onAlertIdChange,
+    onHistoryCheckpoint,
+    onPoll,
+    lastAlertId = null,
+    lastHistoryTimestamp = null,
+  }) {
     this.pollIntervalMs = pollIntervalMs;
     this.onAlert = onAlert;
     this.onAlertIdChange = onAlertIdChange;
+    this.onHistoryCheckpoint = onHistoryCheckpoint || null;
     this.onPoll = onPoll || null;
     this._timer = null;
     this._historyTimer = null;
     this._lastAlertId = lastAlertId;
-    this._lastHistoryId = null;
+    this._lastHistoryTimestamp = lastHistoryTimestamp;
     this._firstSuccessfulPoll = false;
+    this._consecutiveFailures = 0;
   }
 
   start() {
@@ -47,6 +60,7 @@ class PikudHaorefSource {
   async _poll() {
     try {
       const data = await this._fetch();
+      this._consecutiveFailures = 0;
 
       if (!this._firstSuccessfulPoll) {
         this._firstSuccessfulPoll = true;
@@ -65,9 +79,15 @@ class PikudHaorefSource {
           );
 
           try {
-            await this.onAlert(normalized);
-            this._lastAlertId = data.id;
-            if (this.onAlertIdChange) this.onAlertIdChange(data.id);
+            const delivered = await this.onAlert(normalized);
+            if (delivered) {
+              this._lastAlertId = data.id;
+              if (this.onAlertIdChange) this.onAlertIdChange(data.id);
+            } else {
+              logger.warn('Pikud HaOref: alert not confirmed delivered, will retry', {
+                id: data.id,
+              });
+            }
           } catch (err) {
             logger.error('Pikud HaOref: alert handler failed, will retry next poll', {
               error: err.message,
@@ -78,9 +98,23 @@ class PikudHaorefSource {
         logger.debug('Pikud HaOref: no active alerts');
       }
     } catch (err) {
-      logger.error('Pikud HaOref: poll error', { error: err.message });
+      this._consecutiveFailures++;
+      logger.error('Pikud HaOref: poll error', {
+        error: err.message,
+        consecutiveFailures: this._consecutiveFailures,
+      });
     } finally {
-      this._timer = setTimeout(() => this._poll(), this.pollIntervalMs);
+      const backoff = Math.min(
+        this.pollIntervalMs * Math.pow(2, this._consecutiveFailures),
+        MAX_BACKOFF_MS,
+      );
+      const nextPoll = this._consecutiveFailures > 0 ? backoff : this.pollIntervalMs;
+      if (this._consecutiveFailures > 0) {
+        logger.warn(`Pikud HaOref: backing off, next poll in ${nextPoll}ms`, {
+          consecutiveFailures: this._consecutiveFailures,
+        });
+      }
+      this._timer = setTimeout(() => this._poll(), nextPoll);
     }
   }
 
@@ -89,42 +123,53 @@ class PikudHaorefSource {
       const data = await this._fetchUrl(HISTORY_URL);
       if (!data || !Array.isArray(data) || data.length === 0) return;
 
-      const latest = data[0];
-      const historyId = `history_${latest.alertDate}_${latest.data}`;
-      if (historyId === this._lastHistoryId) return;
+      const checkpoint = this._lastHistoryTimestamp || 0;
+      const newEntries = data.filter((entry) => {
+        const ts = new Date(entry.alertDate).getTime();
+        return ts > checkpoint && !isNaN(ts);
+      });
 
-      const alertTime = new Date(latest.alertDate).getTime();
-      const isRecent = Date.now() - alertTime < 30000;
+      if (newEntries.length === 0) return;
 
-      if (isRecent) {
+      newEntries.sort((a, b) => new Date(a.alertDate) - new Date(b.alertDate));
+
+      let latestProcessed = checkpoint;
+      for (const entry of newEntries) {
         const normalized = {
-          id: historyId,
-          cat: historyCatToLiveCat(latest.category),
-          title: latest.title || '',
-          cities: latest.data ? [latest.data] : [],
-          instructions: latest.desc || '',
+          id: `history_${entry.alertDate}_${entry.data}`,
+          cat: historyCatToLiveCat(entry.category),
+          title: entry.title || '',
+          cities: entry.data ? [entry.data] : [],
+          instructions: entry.desc || '',
           source: 'pikud_haoref_history',
-          raw: latest,
+          raw: entry,
         };
 
-        logger.info('Pikud HaOref (history): new alert', {
+        logger.info('Pikud HaOref (history): processing alert', {
           cat: normalized.cat,
           cities: normalized.cities,
+          alertDate: entry.alertDate,
         });
 
         try {
           await this.onAlert(normalized);
+          latestProcessed = new Date(entry.alertDate).getTime();
         } catch (err) {
-          logger.error('Pikud HaOref (history): handler failed', { error: err.message });
-          return;
+          logger.warn('Pikud HaOref (history): handler failed, stopping batch', {
+            error: err.message,
+          });
+          break;
         }
       }
 
-      this._lastHistoryId = historyId;
+      if (latestProcessed > checkpoint) {
+        this._lastHistoryTimestamp = latestProcessed;
+        if (this.onHistoryCheckpoint) this.onHistoryCheckpoint(latestProcessed);
+      }
     } catch (err) {
-      logger.debug('Pikud HaOref (history): poll error', { error: err.message });
+      logger.warn('Pikud HaOref (history): poll error', { error: err.message });
     } finally {
-      this._historyTimer = setTimeout(() => this._pollHistory(), 10000);
+      this._historyTimer = setTimeout(() => this._pollHistory(), HISTORY_POLL_INTERVAL_MS);
     }
   }
 
@@ -167,10 +212,9 @@ class PikudHaorefSource {
           }
 
           try {
-            // eslint-disable-next-line no-control-regex
             const clean = body
               .replace(/^\uFEFF/, '')
-              .replace(/\x00/g, '')
+              .replace(/\x00/g, '') // eslint-disable-line no-control-regex
               .trim();
             if (!clean || clean === '[]') {
               resolve(null);

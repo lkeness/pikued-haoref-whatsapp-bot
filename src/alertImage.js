@@ -1,10 +1,10 @@
 const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { isReleaseMessage } = require('./alertTypes');
 const { AlertCategory } = require('./alertCategories');
 const { formatDateParts } = require('./utils');
+const { MAX_CITIES_DISPLAY } = require('./constants');
 
 const PIKUD_LOGO_B64 = fs
   .readFileSync(path.resolve(__dirname, 'assets/pikud-logo.png'))
@@ -123,13 +123,14 @@ async function generateAlertImage(alert) {
 
   const title = alert.title || 'התרעה';
 
-  const MAX_CITIES = 15;
   const cities = alert.cities || [];
   let cityText;
   if (cities.length === 0) {
     cityText = 'כל הארץ';
-  } else if (cities.length > MAX_CITIES) {
-    cityText = cities.slice(0, MAX_CITIES).join(', ') + ` ועוד ${cities.length - MAX_CITIES}...`;
+  } else if (cities.length > MAX_CITIES_DISPLAY) {
+    cityText =
+      cities.slice(0, MAX_CITIES_DISPLAY).join(', ') +
+      ` ועוד ${cities.length - MAX_CITIES_DISPLAY}...`;
   } else {
     cityText = cities.join(', ');
   }
@@ -296,11 +297,4 @@ async function generateAlertImage(alert) {
   return await sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-async function generateAlertImageFile(alert) {
-  const buffer = await generateAlertImage(alert);
-  const filePath = path.join(os.tmpdir(), `alert_${Date.now()}.png`);
-  fs.writeFileSync(filePath, buffer);
-  return filePath;
-}
-
-module.exports = { generateAlertImage, generateAlertImageFile };
+module.exports = { generateAlertImage };

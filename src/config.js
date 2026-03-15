@@ -1,8 +1,17 @@
 require('dotenv').config();
 
+const required = ['WHATSAPP_GROUP_ID'];
+for (const key of required) {
+  if (!process.env[key]) {
+    console.error(`Missing required env var: ${key}. Run \`npm run setup\` to configure.`);
+    process.exit(1);
+  }
+}
+
 const config = {
   whatsappGroupId: process.env.WHATSAPP_GROUP_ID,
   maintenanceGroupId: process.env.MAINTENANCE_GROUP_ID || null,
+  logLevel: process.env.LOG_LEVEL || 'info',
   pikudHaoref: {
     pollIntervalMs: parseInt(process.env.PIKUD_HAOREF_POLL_INTERVAL_MS) || 3000,
   },
@@ -15,6 +24,7 @@ const config = {
   dedupWindowMs: parseInt(process.env.DEDUP_WINDOW_MS) || 60000,
   maintenanceStatusIntervalMs:
     parseInt(process.env.MAINTENANCE_STATUS_INTERVAL_MS) || 30 * 60 * 1000,
+  maxQueueAgeMs: parseInt(process.env.MAX_QUEUE_AGE_MS) || 180000,
 };
 
 module.exports = config;

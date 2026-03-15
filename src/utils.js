@@ -14,16 +14,28 @@ function atomicWriteSync(filePath, data) {
 }
 
 function withTimeout(promise, ms) {
+  let settled = false;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`Timed out after ${ms}ms`));
+      }
+    }, ms);
     promise.then(
       (val) => {
         clearTimeout(timer);
-        resolve(val);
+        if (!settled) {
+          settled = true;
+          resolve(val);
+        }
       },
       (err) => {
         clearTimeout(timer);
-        reject(err);
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
       },
     );
   });
@@ -46,4 +58,16 @@ function formatDateParts() {
   return { date: `${dd}/${mm}/${yyyy}`, time };
 }
 
-module.exports = { atomicWriteSync, withTimeout, formatTimestamp, formatDateParts };
+function createMutex() {
+  let pending = Promise.resolve();
+  return function (fn) {
+    const result = pending.then(() => fn());
+    pending = result.then(
+      () => {},
+      () => {},
+    );
+    return result;
+  };
+}
+
+module.exports = { atomicWriteSync, withTimeout, formatTimestamp, formatDateParts, createMutex };

@@ -68,7 +68,7 @@ class MaintenanceChannel {
       ];
       this._enqueueSend(lines.join('\n'));
     } catch (err) {
-      logger.debug('Maintenance: notifyStartup failed', { error: err.message });
+      logger.warn('Maintenance: notifyStartup failed', { error: err.message });
     }
   }
 
@@ -85,7 +85,7 @@ class MaintenanceChannel {
       ];
       return this._sendDirect(lines.join('\n'));
     } catch (err) {
-      logger.debug('Maintenance: notifyShutdown failed', { error: err.message });
+      logger.warn('Maintenance: notifyShutdown failed', { error: err.message });
     }
   }
 
@@ -100,7 +100,7 @@ class MaintenanceChannel {
       ];
       this._enqueueSend(lines.join('\n'));
     } catch (err) {
-      logger.debug('Maintenance: notifyError failed', { error: err.message });
+      logger.warn('Maintenance: notifyError failed', { error: err.message });
     }
   }
 
@@ -118,7 +118,7 @@ class MaintenanceChannel {
       ];
       this._enqueueSend(lines.join('\n'));
     } catch (err) {
-      logger.debug('Maintenance: notifyReconnection failed', { error: err.message });
+      logger.warn('Maintenance: notifyReconnection failed', { error: err.message });
     }
   }
 
@@ -144,10 +144,6 @@ class MaintenanceChannel {
         case 'groups':
         case '!groups':
           return await this._cmdListGroups();
-
-        case 'restart':
-        case '!restart':
-          return await this._cmdRestart();
 
         case 'queue':
         case '!queue':
@@ -181,7 +177,7 @@ class MaintenanceChannel {
       try {
         this._enqueueSend(this._formatStatus());
       } catch (err) {
-        logger.debug('Maintenance: periodic status failed', { error: err.message });
+        logger.warn('Maintenance: periodic status failed', { error: err.message });
       }
     }, intervalMs);
   }
@@ -193,8 +189,6 @@ class MaintenanceChannel {
     }
   }
 
-  // --- Commands ---
-
   async _cmdListGroups() {
     const groups = await this.whatsapp.listGroups();
     if (groups.length === 0) {
@@ -205,15 +199,6 @@ class MaintenanceChannel {
       lines.push(`• *${g.name}*`, `  ${g.id}`, '');
     }
     return lines.join('\n');
-  }
-
-  async _cmdRestart() {
-    try {
-      this.whatsapp.restart();
-      return '🔄 WhatsApp socket restart triggered.';
-    } catch (err) {
-      return `❌ Restart failed: ${err.message}`;
-    }
   }
 
   _cmdQueue(arg) {
@@ -268,6 +253,7 @@ class MaintenanceChannel {
       `Send event ended: ${cfg.sendEventEnded ? 'Yes' : 'No'}`,
       `Dedup window: ${cfg.dedupWindowMs / 1000}s`,
       `Maintenance status interval: ${cfg.maintenanceStatusIntervalMs / 60000}min`,
+      `Queue max age: ${cfg.maxQueueAgeMs / 1000}s`,
       `Alert group: ${cfg.whatsappGroupId}`,
       `Maintenance group: ${cfg.maintenanceGroupId || 'none'}`,
     ].join('\n');
@@ -281,7 +267,6 @@ class MaintenanceChannel {
       '• *ping* — Check if bot is alive',
       '• *uptime* — Quick uptime check',
       '• *groups* — List all WhatsApp groups + IDs',
-      '• *restart* — Trigger WhatsApp socket restart',
       '• *queue* — Show pending message queue',
       '• *queue clear* — Clear the message queue',
       '• *dedup* — Show dedup state',
@@ -290,8 +275,6 @@ class MaintenanceChannel {
       '• *help* — This message',
     ].join('\n');
   }
-
-  // --- Status formatting ---
 
   _formatStatus() {
     const now = Date.now();
@@ -330,10 +313,6 @@ class MaintenanceChannel {
     return `${minutes}m`;
   }
 
-  // --- Send isolation ---
-  // Maintenance sends are rate-limited and queued separately from alert delivery.
-  // A failure here never propagates to the caller.
-
   _enqueueSend(text) {
     this._sendQueue.push(text);
     if (!this._draining) this._drainSendQueue();
@@ -357,7 +336,7 @@ class MaintenanceChannel {
       this._lastSendAt = Date.now();
       await this.whatsapp.sendRaw(this.groupId, { text });
     } catch (err) {
-      logger.debug('Maintenance: send failed', { error: err.message });
+      logger.warn('Maintenance: send failed', { error: err.message });
     }
   }
 }

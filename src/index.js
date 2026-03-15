@@ -6,27 +6,29 @@ const AlertDeduplicator = require('./dedup');
 const PikudHaorefSource = require('./pikudHaoref');
 const WhatsAppClient = require('./whatsapp-baileys');
 const MaintenanceChannel = require('./maintenance');
+const { createMutex } = require('./utils');
 
-// Suppress libsignal stderr noise (harmless decryption warnings from offline messages)
+const STDERR_NOISE_PATTERNS = [
+  'Bad MAC',
+  'Failed to decrypt',
+  'No matching sessions',
+  'Closing open session',
+  'Session error',
+  'decryptGroupSignalProto',
+  'pre-key',
+  'prekey',
+  'senderKeyMessage',
+];
+
 const origStderrWrite = process.stderr.write.bind(process.stderr);
 process.stderr.write = function (chunk, encoding, callback) {
   const str = typeof chunk === 'string' ? chunk : chunk.toString();
-  if (
-    str.includes('Bad MAC') ||
-    str.includes('Failed to decrypt') ||
-    str.includes('No matching sessions') ||
-    str.includes('Closing open session in favor')
-  ) {
+  if (STDERR_NOISE_PATTERNS.some((p) => str.includes(p))) {
     if (typeof callback === 'function') callback();
     return true;
   }
   return origStderrWrite(chunk, encoding, callback);
 };
-
-if (!config.whatsappGroupId) {
-  logger.error('WHATSAPP_GROUP_ID is not set. Run `npm run setup` first, then add it to .env');
-  process.exit(1);
-}
 
 logger.info('Starting Red Alert WhatsApp Bot', {
   pollIntervalMs: config.pikudHaoref.pollIntervalMs,
@@ -39,7 +41,8 @@ const dedup = new AlertDeduplicator(config.dedupWindowMs);
 
 const whatsapp = new WhatsAppClient({
   groupId: config.whatsappGroupId,
-  onMessage: (jid, text) => {
+  maxQueueAgeMs: config.maxQueueAgeMs,
+  onMessage: (jid, text, _fromMe) => {
     if (config.maintenanceGroupId && jid === config.maintenanceGroupId && maintenance.enabled) {
       maintenance
         .handleCommand(text)
@@ -61,49 +64,57 @@ const maintenance = new MaintenanceChannel({
 
 maintenance.setDeps({ dedup, config });
 
+const alertMutex = createMutex();
+
 async function handleAlert(alert) {
-  if (isReleaseMessage(alert) && !config.sendEventEnded) {
-    return;
-  }
+  return alertMutex(async () => {
+    if (isReleaseMessage(alert) && !config.sendEventEnded) {
+      return true;
+    }
 
-  const totalCities = alert.cities?.length || 0;
+    const totalCities = alert.cities?.length || 0;
 
-  if (config.filterCities.length > 0 && alert.cities && totalCities > 0) {
-    const matchingCities = alert.cities.filter((city) =>
-      config.filterCities.some((filter) => city === filter),
+    if (config.filterCities.length > 0 && alert.cities && totalCities > 0) {
+      const matchingCities = alert.cities.filter((city) =>
+        config.filterCities.some((filter) => city === filter),
+      );
+      if (matchingCities.length === 0) return true;
+      alert.cities = matchingCities;
+    }
+
+    logger.info(
+      `⚠ ALERT: cat=${alert.cat} "${alert.title}" (${alert.cities?.length || 0}/${totalCities} cities)`,
+      { id: alert.raw?.id, cat: alert.cat, title: alert.title },
     );
-    if (matchingCities.length === 0) return;
-    alert.cities = matchingCities;
-  }
 
-  logger.info(
-    `⚠ ALERT: cat=${alert.cat} "${alert.title}" (${alert.cities?.length || 0}/${totalCities} cities)`,
-    { id: alert.raw?.id, cat: alert.cat, title: alert.title },
-  );
+    if (dedup.isDuplicate(alert)) {
+      logger.info('Duplicate, skipping');
+      return true;
+    }
 
-  if (dedup.isDuplicate(alert)) {
-    logger.info('Duplicate, skipping');
-    return;
-  }
+    let sent;
+    const textMessage = formatAlertMessage(alert);
 
-  let sent;
-  try {
-    const imageBuffer = await generateAlertImage(alert);
-    sent = await whatsapp.sendImage(imageBuffer);
-  } catch (err) {
-    logger.warn('Image failed, sending text', { error: err.message });
-    const message = formatAlertMessage(alert);
-    sent = await whatsapp.sendMessage(message);
-  }
+    try {
+      const imageBuffer = await generateAlertImage(alert);
+      sent = await whatsapp.sendImage(imageBuffer);
+    } catch (err) {
+      logger.warn('Image failed, sending text', { error: err.message });
+      sent = await whatsapp.sendMessage(textMessage);
+    }
 
-  if (sent) {
     dedup.markSeen(alert);
-    logger.info('Alert delivered');
-    maintenance.recordAlertSent();
-  } else {
+
+    if (sent) {
+      logger.info('Alert delivered');
+      maintenance.recordAlertSent();
+      return true;
+    }
+
     logger.warn('Alert queued for retry');
     maintenance.recordAlertFailed();
-  }
+    return false;
+  });
 }
 
 let pikudSource = null;
@@ -124,8 +135,10 @@ async function start() {
     pollIntervalMs: config.pikudHaoref.pollIntervalMs,
     onAlert: handleAlert,
     onAlertIdChange: (id) => dedup.setLastAlertId(id),
+    onHistoryCheckpoint: (ts) => dedup.setLastHistoryTimestamp(ts),
     onPoll: () => maintenance.recordPoll(),
     lastAlertId: dedup.lastAlertId,
+    lastHistoryTimestamp: dedup.lastHistoryTimestamp,
   });
   pikudSource.start();
   maintenance.setDeps({ pikudSource });
@@ -145,13 +158,13 @@ async function shutdown(signal) {
   try {
     await maintenance.notifyShutdown(signal);
   } catch {
-    // best-effort — don't let maintenance block shutdown
+    /* best-effort */
   }
 
   try {
     await whatsapp.destroy();
   } catch {
-    // ignore
+    /* ignore */
   }
 
   logger.info('Shutdown complete');
@@ -163,16 +176,26 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception', { error: err.message, stack: err.stack });
-  whatsapp._persistQueue();
-  maintenance.notifyError('Uncaught exception', err);
+  try {
+    whatsapp.persistQueue();
+  } catch {
+    /* best-effort */
+  }
+  try {
+    maintenance.notifyError('Uncaught exception', err);
+  } catch {
+    /* best-effort */
+  }
   setTimeout(() => process.exit(1), 3000);
 });
 
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled rejection', { reason: reason?.toString() });
-  whatsapp._persistQueue();
-  maintenance.notifyError('Unhandled rejection', { message: reason?.toString() });
-  setTimeout(() => process.exit(1), 3000);
+  try {
+    maintenance.notifyError('Unhandled rejection', { message: reason?.toString() });
+  } catch {
+    /* best-effort */
+  }
 });
 
 start();

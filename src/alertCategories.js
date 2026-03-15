@@ -1,5 +1,3 @@
-// Live alerts.json uses matrixCatId as its `cat` field.
-// Verified against https://www.oref.org.il/alerts/alertsTranslation.json
 const AlertCategory = Object.freeze({
   MISSILES: '1',
   EARTHQUAKE: '3',
@@ -11,8 +9,6 @@ const AlertCategory = Object.freeze({
   TERRORIST_INFILTRATION: '13',
 });
 
-// AlertsHistory.json uses catId, which is a DIFFERENT numbering scheme.
-// This map converts history catId → live matrixCatId for unified handling.
 const HISTORY_TO_LIVE_CAT = Object.freeze({
   1: AlertCategory.MISSILES,
   2: AlertCategory.HOSTILE_AIRCRAFT,
@@ -30,8 +26,4 @@ function historyCatToLiveCat(historyCat) {
   return HISTORY_TO_LIVE_CAT[parseInt(historyCat)] ?? String(historyCat);
 }
 
-function isDrill(cat) {
-  return parseInt(cat) >= 100;
-}
-
-module.exports = { AlertCategory, historyCatToLiveCat, isDrill };
+module.exports = { AlertCategory, historyCatToLiveCat };
