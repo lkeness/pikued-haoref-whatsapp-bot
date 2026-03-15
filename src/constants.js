@@ -70,6 +70,7 @@ const SETUP_DELAY_MS = 3_000;
 const LIBSIGNAL_NOISE_PATTERNS = [
   'Bad MAC',
   'Failed to decrypt',
+  'Decrypted message with closed session',
   'No matching sessions',
   'Closing open session',
   'Closing session:',
