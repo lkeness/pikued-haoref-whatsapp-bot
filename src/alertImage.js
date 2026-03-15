@@ -1,13 +1,10 @@
 const sharp = require('sharp');
 const fs = require('fs');
-const path = require('path');
-const { isReleaseMessage, isHfcUpdate } = require('./alertTypes');
+const { isReleaseMessage, isHfcUpdate, formatCityList } = require('./alertTypes');
 const { formatDateParts } = require('./utils');
-const { MAX_CITIES_DISPLAY } = require('./constants');
+const { PIKUD_LOGO_PATH } = require('./constants');
 
-const PIKUD_LOGO_B64 = fs
-  .readFileSync(path.resolve(__dirname, 'assets/pikud-logo.png'))
-  .toString('base64');
+const PIKUD_LOGO_B64 = fs.readFileSync(PIKUD_LOGO_PATH).toString('base64');
 
 const COLORS = {
   active: {
@@ -122,17 +119,7 @@ async function generateAlertImage(alert) {
 
   const title = alert.title || 'התרעה';
 
-  const cities = alert.cities || [];
-  let cityText;
-  if (cities.length === 0) {
-    cityText = 'כל הארץ';
-  } else if (cities.length > MAX_CITIES_DISPLAY) {
-    cityText =
-      cities.slice(0, MAX_CITIES_DISPLAY).join(', ') +
-      ` ועוד ${cities.length - MAX_CITIES_DISPLAY}...`;
-  } else {
-    cityText = cities.join(', ');
-  }
+  const cityText = formatCityList(alert.cities);
 
   const instructions = alert.instructions || '';
 

@@ -1,20 +1,14 @@
 const https = require('https');
 const logger = require('./logger');
-const { historyCatToLiveCat } = require('./alertCategories');
-
-const ALERTS_URL = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
-const HISTORY_URL = 'https://www.oref.org.il/WarningMessages/History/AlertsHistory.json';
-
-const REQUEST_HEADERS = {
-  Accept: 'application/json',
-  'Accept-Language': 'he',
-  'X-Requested-With': 'XMLHttpRequest',
-  Referer: 'https://www.oref.org.il/',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-};
-
-const HISTORY_POLL_INTERVAL_MS = 10_000;
-const MAX_BACKOFF_MS = 60_000;
+const { historyCatToLiveCat } = require('./alertTypes');
+const {
+  OREF_ALERTS_URL,
+  OREF_HISTORY_URL,
+  OREF_REQUEST_HEADERS,
+  OREF_HTTP_TIMEOUT_MS,
+  HISTORY_POLL_INTERVAL_MS,
+  POLL_MAX_BACKOFF_MS,
+} = require('./constants');
 
 class PikudHaorefSource {
   constructor({
@@ -106,7 +100,7 @@ class PikudHaorefSource {
     } finally {
       const backoff = Math.min(
         this.pollIntervalMs * Math.pow(2, this._consecutiveFailures),
-        MAX_BACKOFF_MS,
+        POLL_MAX_BACKOFF_MS,
       );
       const nextPoll = this._consecutiveFailures > 0 ? backoff : this.pollIntervalMs;
       if (this._consecutiveFailures > 0) {
@@ -120,7 +114,7 @@ class PikudHaorefSource {
 
   async _pollHistory() {
     try {
-      const data = await this._fetchUrl(HISTORY_URL);
+      const data = await this._fetchUrl(OREF_HISTORY_URL);
       if (!data || !Array.isArray(data) || data.length === 0) return;
 
       const checkpoint = this._lastHistoryTimestamp || 0;
@@ -187,7 +181,7 @@ class PikudHaorefSource {
   }
 
   _fetch() {
-    return this._fetchUrl(ALERTS_URL);
+    return this._fetchUrl(OREF_ALERTS_URL);
   }
 
   _fetchUrl(url) {
@@ -197,8 +191,8 @@ class PikudHaorefSource {
         hostname: parsedUrl.hostname,
         path: parsedUrl.pathname,
         method: 'GET',
-        headers: REQUEST_HEADERS,
-        timeout: 5000,
+        headers: OREF_REQUEST_HEADERS,
+        timeout: OREF_HTTP_TIMEOUT_MS,
       };
 
       const req = https.request(options, (res) => {

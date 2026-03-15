@@ -1,7 +1,13 @@
 const fs = require('fs');
 const winston = require('winston');
 const config = require('./config');
-const { LOGS_DIR } = require('./constants');
+const {
+  LOGS_DIR,
+  ERROR_LOG_MAX_SIZE,
+  ERROR_LOG_MAX_FILES,
+  COMBINED_LOG_MAX_SIZE,
+  COMBINED_LOG_MAX_FILES,
+} = require('./constants');
 
 if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
 
@@ -19,13 +25,13 @@ const logger = winston.createLogger({
     new winston.transports.File({
       filename: `${LOGS_DIR}/error.log`,
       level: 'error',
-      maxsize: 5 * 1024 * 1024,
-      maxFiles: 3,
+      maxsize: ERROR_LOG_MAX_SIZE,
+      maxFiles: ERROR_LOG_MAX_FILES,
     }),
     new winston.transports.File({
       filename: `${LOGS_DIR}/combined.log`,
-      maxsize: 10 * 1024 * 1024,
-      maxFiles: 5,
+      maxsize: COMBINED_LOG_MAX_SIZE,
+      maxFiles: COMBINED_LOG_MAX_FILES,
     }),
   ],
 });
