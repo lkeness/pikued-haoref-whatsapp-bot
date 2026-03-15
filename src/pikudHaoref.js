@@ -53,7 +53,7 @@ class PikudHaorefSource {
 
   async _poll() {
     try {
-      const data = await this._fetch();
+      const raw = await this._fetch();
       this._consecutiveFailures = 0;
 
       if (!this._firstSuccessfulPoll) {
@@ -63,6 +63,7 @@ class PikudHaorefSource {
 
       if (this.onPoll) this.onPoll();
 
+      const data = Array.isArray(raw) ? raw[0] : raw;
       if (data && data.id && data.id !== this._lastAlertId) {
         const normalized = this._normalize(data);
         if (!normalized) {
@@ -129,11 +130,12 @@ class PikudHaorefSource {
 
       let latestProcessed = checkpoint;
       for (const entry of newEntries) {
+        const cities = Array.isArray(entry.data) ? entry.data : entry.data ? [entry.data] : [];
         const normalized = {
-          id: `history_${entry.alertDate}_${entry.data}`,
+          id: `history_${entry.alertDate}_${cities.join(',')}`,
           cat: historyCatToLiveCat(entry.category),
           title: entry.title || '',
-          cities: entry.data ? [entry.data] : [],
+          cities,
           instructions: entry.desc || '',
           source: 'pikud_haoref_history',
           raw: entry,

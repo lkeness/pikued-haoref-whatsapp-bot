@@ -4,7 +4,12 @@ const { isReleaseMessage, isHfcUpdate, formatCityList } = require('./alertTypes'
 const { formatDateParts } = require('./utils');
 const { PIKUD_LOGO_PATH } = require('./constants');
 
-const PIKUD_LOGO_B64 = fs.readFileSync(PIKUD_LOGO_PATH).toString('base64');
+let PIKUD_LOGO_B64 = '';
+try {
+  PIKUD_LOGO_B64 = fs.readFileSync(PIKUD_LOGO_PATH).toString('base64');
+} catch (err) {
+  throw new Error(`Failed to load logo at ${PIKUD_LOGO_PATH}: ${err.message}`);
+}
 
 const COLORS = {
   active: {

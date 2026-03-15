@@ -1,6 +1,7 @@
 const https = require('https');
 const fs = require('fs');
 const logger = require('./logger');
+const { atomicWriteSync } = require('./utils');
 const {
   OREF_TRANSLATIONS_URL,
   ALERT_METADATA_CACHE_FILE,
@@ -166,7 +167,7 @@ class AlertMetadata {
 
   _saveCache(data) {
     try {
-      fs.writeFileSync(ALERT_METADATA_CACHE_FILE, JSON.stringify(data));
+      atomicWriteSync(ALERT_METADATA_CACHE_FILE, JSON.stringify(data));
     } catch (err) {
       logger.warn('AlertMetadata: cache save failed', { error: err.message });
     }
