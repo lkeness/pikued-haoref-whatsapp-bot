@@ -359,7 +359,11 @@ class WhatsAppClient {
       if (!fs.existsSync(QUEUE_FILE)) return;
       const data = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
       if (Array.isArray(data)) {
-        this._messageQueue = data;
+        const now = Date.now();
+        this._messageQueue = data.map((item) => ({
+          ...item,
+          enqueuedAt: item.enqueuedAt || now,
+        }));
         logger.info('WhatsApp: loaded queued messages', { count: data.length });
       }
     } catch (err) {

@@ -7,6 +7,7 @@ const {
   fetchLatestBaileysVersion,
   delay,
 } = require('@whiskeysockets/baileys');
+const pino = require('pino');
 const qrcode = require('qrcode-terminal');
 const { FALLBACK_WA_VERSION, SESSION_DIR, WA_BROWSER_ID, SETUP_DELAY_MS } = require('./constants');
 
@@ -57,6 +58,7 @@ async function setup() {
 
   const sock = makeWASocket({
     auth: state,
+    logger: pino({ level: 'silent' }),
     version,
     printQRInTerminal: false,
     browser: WA_BROWSER_ID,
