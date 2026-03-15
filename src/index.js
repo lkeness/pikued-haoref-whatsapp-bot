@@ -119,6 +119,7 @@ async function start() {
 
   maintenance.notifyStartup(config);
   maintenance.startPeriodicStatus(config.maintenanceStatusIntervalMs);
+  maintenance.startHttpInterface();
 
   pikudSource = new PikudHaorefSource({
     pollIntervalMs: config.pikudHaoref.pollIntervalMs,
@@ -141,6 +142,7 @@ async function shutdown(signal) {
 
   if (pikudSource) pikudSource.stop();
   maintenance.stopPeriodicStatus();
+  maintenance.stopHttpInterface();
 
   try {
     await maintenance.notifyShutdown(signal);
