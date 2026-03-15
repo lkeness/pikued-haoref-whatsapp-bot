@@ -7,17 +7,32 @@ const PikudHaorefSource = require('./pikudHaoref');
 const WhatsAppClient = require('./whatsapp-baileys');
 const MaintenanceChannel = require('./maintenance');
 const alertMetadata = require('./alertMetadata');
-const { createMutex } = require('./utils');
-const { STDERR_NOISE_PATTERNS, CRASH_EXIT_DELAY_MS } = require('./constants');
+const { createMutex, formatDateParts } = require('./utils');
+const { LIBSIGNAL_NOISE_PATTERNS, CRASH_EXIT_DELAY_MS } = require('./constants');
+
+function isLibsignalNoise(str) {
+  return LIBSIGNAL_NOISE_PATTERNS.some((p) => str.includes(p));
+}
 
 const origStderrWrite = process.stderr.write.bind(process.stderr);
 process.stderr.write = function (chunk, encoding, callback) {
   const str = typeof chunk === 'string' ? chunk : chunk.toString();
-  if (STDERR_NOISE_PATTERNS.some((p) => str.includes(p))) {
+  if (isLibsignalNoise(str)) {
+    logger.debug('libsignal:', str.trim());
     if (typeof callback === 'function') callback();
     return true;
   }
   return origStderrWrite(chunk, encoding, callback);
+};
+
+const origStdoutWrite = process.stdout.write.bind(process.stdout);
+process.stdout.write = function (chunk, encoding, callback) {
+  const str = typeof chunk === 'string' ? chunk : chunk.toString();
+  if (isLibsignalNoise(str)) {
+    if (typeof callback === 'function') callback();
+    return true;
+  }
+  return origStdoutWrite(chunk, encoding, callback);
 };
 
 logger.info('Starting Red Alert WhatsApp Bot', {
@@ -87,7 +102,9 @@ async function handleAlert(alert) {
 
     try {
       const imageBuffer = await generateAlertImage(alert);
-      sent = await whatsapp.sendImage(imageBuffer);
+      const { time } = formatDateParts();
+      const caption = time.slice(0, 5);
+      sent = await whatsapp.sendImage(imageBuffer, caption);
     } catch (err) {
       logger.warn('Image failed, sending text', { error: err.message });
       sent = await whatsapp.sendMessage(textMessage);

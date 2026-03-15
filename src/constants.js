@@ -64,12 +64,15 @@ const COMBINED_LOG_MAX_FILES = 5;
 const CRASH_EXIT_DELAY_MS = 3_000;
 const SETUP_DELAY_MS = 3_000;
 
-// Stderr noise suppression
-const STDERR_NOISE_PATTERNS = [
+// libsignal internal logging noise (Signal protocol session negotiation)
+// All originate from node_modules/libsignal/src/ — Baileys handles these gracefully.
+// Real connection issues come through Baileys' connection.update event.
+const LIBSIGNAL_NOISE_PATTERNS = [
   'Bad MAC',
   'Failed to decrypt',
   'No matching sessions',
   'Closing open session',
+  'Closing session:',
   'Session error',
   'decryptGroupSignalProto',
   'pre-key',
@@ -116,5 +119,5 @@ module.exports = {
   COMBINED_LOG_MAX_FILES,
   CRASH_EXIT_DELAY_MS,
   SETUP_DELAY_MS,
-  STDERR_NOISE_PATTERNS,
+  LIBSIGNAL_NOISE_PATTERNS,
 };

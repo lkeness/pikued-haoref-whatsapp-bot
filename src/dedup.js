@@ -13,19 +13,38 @@ class AlertDeduplicator {
     this._load();
   }
 
-  makeKey(alert) {
-    const cities = (alert.cities || []).slice().sort().join('|');
-    return `${alert.cat}::${cities}`;
+  _contentKey(cat, cities) {
+    const sorted = (cities || []).slice().sort().join('|');
+    return `${cat}::${sorted}`;
   }
 
   isDuplicate(alert) {
     this._cleanup();
-    return this.seen.has(this.makeKey(alert));
+
+    if (alert.source === 'pikud_haoref') {
+      const isDup = alert.id ? this.seen.has(`id::${alert.id}`) : false;
+      if (isDup) {
+        logger.debug('Dedup: live alert already seen', { id: alert.id });
+      }
+      return isDup;
+    }
+
+    const key = this._contentKey(alert.cat, alert.cities);
+    const isDup = this.seen.has(key);
+    if (isDup) {
+      logger.debug('Dedup: history content already seen', { key });
+    }
+    return isDup;
   }
 
   markSeen(alert) {
-    const key = this.makeKey(alert);
-    this.seen.set(key, Date.now());
+    const now = Date.now();
+    if (alert.id) {
+      this.seen.set(`id::${alert.id}`, now);
+    }
+    for (const city of alert.cities || []) {
+      this.seen.set(this._contentKey(alert.cat, [city]), now);
+    }
     this._save();
   }
 
