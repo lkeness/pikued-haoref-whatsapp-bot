@@ -123,13 +123,8 @@ class WhatsAppClient {
     if (this._onMessage) {
       this.sock.ev.on('messages.upsert', ({ messages }) => {
         for (const msg of messages) {
-          if (!msg.message) continue;
-          const text =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            msg.message.ephemeralMessage?.message?.conversation ||
-            msg.message.ephemeralMessage?.message?.extendedTextMessage?.text ||
-            '';
+          if (!msg.message || msg.key.fromMe) continue;
+          const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
           if (text) {
             const jid = msg.key.remoteJid;
             const trimmed = text.trim();
