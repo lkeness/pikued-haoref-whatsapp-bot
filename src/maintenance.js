@@ -1,4 +1,3 @@
-const http = require('http');
 const logger = require('./logger');
 const { formatTimestamp } = require('./utils');
 
@@ -329,48 +328,6 @@ class MaintenanceChannel {
     if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
     if (hours > 0) return `${hours}h ${minutes % 60}m`;
     return `${minutes}m`;
-  }
-
-  // --- Local HTTP interface ---
-  // Provides localhost-only command access since Baileys can't receive
-  // messages from the same WhatsApp account (msmsg decryption limitation).
-
-  startHttpInterface(port = 3700) {
-    this._httpServer = http.createServer(async (req, res) => {
-      const url = new URL(req.url, `http://localhost:${port}`);
-      const cmd = url.pathname.replace(/^\/+/, '').trim();
-      if (!cmd || cmd === 'favicon.ico') {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
-      try {
-        const response = await this.handleCommand(cmd);
-        const text = response || `Unknown command: ${cmd}`;
-        const sendToGroup = url.searchParams.has('send');
-        if (sendToGroup && response) {
-          this._enqueueSend(response);
-        }
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(text + '\n');
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end(`Error: ${err.message}\n`);
-      }
-    });
-    this._httpServer.listen(port, '127.0.0.1', () => {
-      logger.info(`Maintenance: HTTP interface at http://127.0.0.1:${port}/ (try /status, /help)`);
-    });
-    this._httpServer.on('error', (err) => {
-      logger.warn('Maintenance: HTTP interface failed to start', { error: err.message });
-    });
-  }
-
-  stopHttpInterface() {
-    if (this._httpServer) {
-      this._httpServer.close();
-      this._httpServer = null;
-    }
   }
 
   // --- Send isolation ---
