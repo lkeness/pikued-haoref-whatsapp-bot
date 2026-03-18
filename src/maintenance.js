@@ -277,7 +277,10 @@ class MaintenanceChannel {
   }
 
   async _cmdUpdate() {
-    const execOpts = { cwd: process.cwd(), timeout: 30000 };
+    const cwd = process.cwd();
+    const execOpts = { cwd, timeout: 30000 };
+    const longExecOpts = { cwd, timeout: 120000 };
+    const nvmCmd = (cmd) => `bash -lc "${cmd}"`;
     const originalHash = this._gitInfo.hash;
     const results = [];
     results.push(
@@ -288,8 +291,8 @@ class MaintenanceChannel {
       '',
     );
 
-    const run = async (label, cmd) => {
-      const { stdout, stderr } = await execAsync(cmd, execOpts);
+    const run = async (label, cmd, opts = execOpts) => {
+      const { stdout, stderr } = await execAsync(cmd, opts);
       const output = (stdout || stderr || '').trim();
       results.push(`✅ *${label}*${output ? `\n${output}` : ''}`);
     };
@@ -299,6 +302,7 @@ class MaintenanceChannel {
       try {
         await execAsync(`git rebase --abort`, execOpts).catch(() => {});
         await execAsync(`git reset --hard ${originalHash}`, execOpts);
+        await execAsync(nvmCmd('npm install'), longExecOpts).catch(() => {});
         results.push(`⏪ Reverted to ${originalHash}`);
       } catch (revertErr) {
         results.push(`⚠️ Revert failed: ${revertErr.message}`);
@@ -322,16 +326,32 @@ class MaintenanceChannel {
     }
 
     try {
-      await run('pm2 restart', 'pm2 restart red-alert-whatsapp');
+      await run('nvm use', nvmCmd('nvm use'));
     } catch (err) {
       const output = (err.stderr || err.stdout || err.message || '').trim();
-      await revert('pm2 restart', output);
+      await revert('nvm use', output);
+      return results.join('\n');
+    }
+
+    try {
+      await run('npm install', nvmCmd('npm install'), longExecOpts);
+    } catch (err) {
+      const output = (err.stderr || err.stdout || err.message || '').trim();
+      await revert('npm install', output);
       return results.join('\n');
     }
 
     const newInfo = resolveGitInfo();
     if (newInfo.hash !== originalHash) {
       results.push('', `🔖 New: ${newInfo.hash} (${newInfo.branch})`);
+    }
+
+    try {
+      await run('pm2 restart', 'pm2 restart red-alert-whatsapp');
+    } catch (err) {
+      const output = (err.stderr || err.stdout || err.message || '').trim();
+      await revert('pm2 restart', output);
+      return results.join('\n');
     }
 
     return results.join('\n');
