@@ -52,14 +52,20 @@ const dedup = new AlertDeduplicator(config.dedupWindowMs);
 const whatsapp = new WhatsAppClient({
   groupId: config.whatsappGroupId,
   maxQueueAgeMs: config.maxQueueAgeMs,
-  onMessage: (jid, text, _fromMe) => {
+  onMessage: async (jid, text, _fromMe) => {
     if (config.maintenanceGroupId && jid === config.maintenanceGroupId && maintenance.enabled) {
-      maintenance
-        .handleCommand(text)
-        .then((response) => {
-          if (response) whatsapp.sendRaw(jid, { text: response }).catch(() => {});
-        })
-        .catch(() => {});
+      try {
+        const response = await maintenance.handleCommand(text);
+        if (response) {
+          try {
+            await whatsapp.sendRaw(jid, { text: response });
+          } catch {
+            /* best-effort */
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
     }
   },
   onDisconnect: (statusCode, willRetry) => {
@@ -121,8 +127,13 @@ async function handleAlert(alert) {
       const caption = time.slice(0, 5);
       sent = await whatsapp.sendImage(imageBuffer, caption);
     } catch (err) {
-      logger.warn('Image failed, sending text', { error: err.message });
-      sent = await whatsapp.sendMessage(textMessage);
+      logger.warn('Image failed, sending text', { error: err?.message });
+      try {
+        sent = await whatsapp.sendMessage(textMessage);
+      } catch (fallbackErr) {
+        logger.error('Text fallback also failed', { error: fallbackErr?.message });
+        sent = false;
+      }
     }
 
     dedup.markSeen(alert);
@@ -161,8 +172,13 @@ async function handleAdjacentAlert(alert, adjacentCities) {
     const caption = time.slice(0, 5);
     sent = await whatsapp.sendImage(imageBuffer, caption);
   } catch (err) {
-    logger.warn('Adjacent image failed, sending text', { error: err.message });
-    sent = await whatsapp.sendMessage(textMessage);
+    logger.warn('Adjacent image failed, sending text', { error: err?.message });
+    try {
+      sent = await whatsapp.sendMessage(textMessage);
+    } catch (fallbackErr) {
+      logger.error('Adjacent text fallback also failed', { error: fallbackErr?.message });
+      sent = false;
+    }
   }
 
   dedup.markSeen(dedupAlert);

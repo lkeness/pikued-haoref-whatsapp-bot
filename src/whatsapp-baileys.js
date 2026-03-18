@@ -43,6 +43,7 @@ class WhatsAppClient {
     this._sendMutex = createMutex();
     this._flushing = false;
     this._connectedAt = 0;
+    this._reconnectTimer = null;
     this._loadQueue();
   }
 
@@ -121,11 +122,7 @@ class WhatsAppClient {
           if (uptime > 30_000) {
             this._reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
           }
-          const delayMs = this._reconnectDelay;
-          this._reconnectDelay = Math.min(this._reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
-          logger.info(`WhatsApp: reconnecting in ${delayMs}ms`);
-          await delay(delayMs);
-          this._connect();
+          this._scheduleReconnect();
         }
       } else if (connection === 'open') {
         logger.info('WhatsApp: connected');
@@ -138,34 +135,41 @@ class WhatsAppClient {
     });
 
     if (this._onMessage) {
-      this.sock.ev.on('messages.upsert', ({ messages }) => {
+      this.sock.ev.on('messages.upsert', ({ messages } = {}) => {
+        if (!messages) return;
         for (const msg of messages) {
-          if (!msg.message) continue;
+          try {
+            if (!msg?.message || !msg.key) continue;
 
-          let innerMessage = msg.message;
-          let jid = msg.key.remoteJid;
-          const fromMe = !!msg.key.fromMe;
+            let innerMessage = msg.message;
+            let jid = msg.key.remoteJid;
+            const fromMe = !!msg.key.fromMe;
 
-          if (innerMessage.deviceSentMessage) {
-            jid = innerMessage.deviceSentMessage.destinationJid || jid;
-            innerMessage = innerMessage.deviceSentMessage.message || innerMessage;
-          }
+            if (innerMessage.deviceSentMessage) {
+              jid = innerMessage.deviceSentMessage.destinationJid || jid;
+              innerMessage = innerMessage.deviceSentMessage.message || innerMessage;
+            }
 
-          const text =
-            innerMessage.conversation ||
-            innerMessage.extendedTextMessage?.text ||
-            innerMessage.ephemeralMessage?.message?.conversation ||
-            innerMessage.ephemeralMessage?.message?.extendedTextMessage?.text ||
-            '';
-          if (text) {
-            const trimmed = text.trim();
-            logger.info('WhatsApp: message received', { jid, fromMe, text: trimmed });
-            setImmediate(() => {
-              try {
-                this._onMessage(jid, trimmed, fromMe);
-              } catch (err) {
-                logger.debug('WhatsApp: message handler error', { error: err.message });
-              }
+            const text =
+              innerMessage.conversation ||
+              innerMessage.extendedTextMessage?.text ||
+              innerMessage.ephemeralMessage?.message?.conversation ||
+              innerMessage.ephemeralMessage?.message?.extendedTextMessage?.text ||
+              '';
+            if (text) {
+              const trimmed = text.trim();
+              logger.info('WhatsApp: message received', { jid, fromMe, text: trimmed });
+              setImmediate(async () => {
+                try {
+                  await this._onMessage(jid, trimmed, fromMe);
+                } catch (err) {
+                  logger.debug('WhatsApp: message handler error', { error: err?.message });
+                }
+              });
+            }
+          } catch (err) {
+            logger.debug('WhatsApp: error processing incoming message', {
+              error: err?.message,
             });
           }
         }
@@ -201,6 +205,29 @@ class WhatsAppClient {
       this.sock?.end(new Error('Health check failed'));
     } catch {
       /* socket.end can throw if already closed */
+    }
+  }
+
+  _scheduleReconnect() {
+    this._cancelReconnect();
+    const delayMs = this._reconnectDelay;
+    this._reconnectDelay = Math.min(this._reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+    logger.info(`WhatsApp: reconnecting in ${delayMs}ms`);
+    this._reconnectTimer = setTimeout(async () => {
+      this._reconnectTimer = null;
+      try {
+        await this._connect();
+      } catch (err) {
+        logger.error('WhatsApp: reconnect failed, will retry', { error: err?.message });
+        this._scheduleReconnect();
+      }
+    }, delayMs);
+  }
+
+  _cancelReconnect() {
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
     }
   }
 
@@ -312,20 +339,25 @@ class WhatsAppClient {
       this._dropExpired();
       while (this._messageQueue.length > 0 && this.ready) {
         const item = this._messageQueue[0];
-        const success = await this._sendMutex(async () => {
-          if (item.type === 'image') {
-            const buffer = Buffer.from(item.data, 'base64');
-            const msg = { image: buffer, mimetype: 'image/png' };
-            if (item.caption) msg.caption = item.caption;
-            await withTimeout(this.sock.sendMessage(this.groupId, msg), SEND_TIMEOUT_MS);
-          } else {
-            await withTimeout(
-              this.sock.sendMessage(this.groupId, { text: item.data }),
-              SEND_TIMEOUT_MS,
-            );
-          }
-          return true;
-        }).catch(() => false);
+        let success;
+        try {
+          success = await this._sendMutex(async () => {
+            if (item.type === 'image') {
+              const buffer = Buffer.from(item.data, 'base64');
+              const msg = { image: buffer, mimetype: 'image/png' };
+              if (item.caption) msg.caption = item.caption;
+              await withTimeout(this.sock.sendMessage(this.groupId, msg), SEND_TIMEOUT_MS);
+            } else {
+              await withTimeout(
+                this.sock.sendMessage(this.groupId, { text: item.data }),
+                SEND_TIMEOUT_MS,
+              );
+            }
+            return true;
+          });
+        } catch {
+          success = false;
+        }
 
         if (success) {
           this._messageQueue.shift();
@@ -386,6 +418,7 @@ class WhatsAppClient {
   }
 
   async destroy() {
+    this._cancelReconnect();
     this._cancelHealthCheck();
     this._cancelQueueRetry();
     this.persistQueue();
