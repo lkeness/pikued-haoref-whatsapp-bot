@@ -9,10 +9,11 @@ const execAsync = promisify(exec);
 function resolveGitInfo() {
   try {
     const hash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    const fullHash = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
-    return { hash, branch };
+    return { hash, fullHash, branch };
   } catch {
-    return { hash: 'unknown', branch: 'unknown' };
+    return { hash: 'unknown', fullHash: 'unknown', branch: 'unknown' };
   }
 }
 
@@ -281,13 +282,13 @@ class MaintenanceChannel {
     const execOpts = { cwd, timeout: 30000 };
     const longExecOpts = { cwd, timeout: 120000 };
     const nvmCmd = (cmd) => `bash -lc "${cmd}"`;
-    const originalHash = this._gitInfo.hash;
+    const preUpdateInfo = resolveGitInfo();
     const results = [];
     results.push(
       '🔄 *Updating Bot*',
       '',
       `🕐 ${formatTimestamp()}`,
-      `🔖 Current: ${originalHash} (${this._gitInfo.branch})`,
+      `🔖 Current: ${preUpdateInfo.hash} (${preUpdateInfo.branch})`,
       '',
     );
 
@@ -301,9 +302,9 @@ class MaintenanceChannel {
       results.push(`❌ *${failedLabel}* failed\n${failOutput}`);
       try {
         await execAsync(`git rebase --abort`, execOpts).catch(() => {});
-        await execAsync(`git reset --hard ${originalHash}`, execOpts);
+        await execAsync(`git reset --hard ${preUpdateInfo.fullHash}`, execOpts);
         await execAsync(nvmCmd('npm install'), longExecOpts).catch(() => {});
-        results.push(`⏪ Reverted to ${originalHash}`);
+        results.push(`⏪ Reverted to ${preUpdateInfo.hash}`);
       } catch (revertErr) {
         results.push(`⚠️ Revert failed: ${revertErr.message}`);
       }
@@ -342,7 +343,7 @@ class MaintenanceChannel {
     }
 
     const newInfo = resolveGitInfo();
-    if (newInfo.hash !== originalHash) {
+    if (newInfo.fullHash !== preUpdateInfo.fullHash) {
       results.push('', `🔖 New: ${newInfo.hash} (${newInfo.branch})`);
     }
 
