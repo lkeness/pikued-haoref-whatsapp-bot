@@ -96,8 +96,8 @@ function iconExclamation(cx, cy, color) {
   </g>`;
 }
 
-function getIcon(alert, cx, cy, color) {
-  if (isHfcUpdate(alert)) {
+function getIcon(alert, cx, cy, color, options = {}) {
+  if (options.nearby || isHfcUpdate(alert)) {
     return iconExclamation(cx, cy, color);
   }
   return iconBroadcast(cx, cy, color);
@@ -135,7 +135,7 @@ async function generateAlertImage(alert, options = {}) {
 
   const title = nearby ? 'התרעה ביישובים סמוכים' : alert.title || 'התרעה';
 
-  const cityText = nearby ? alert.title || 'התרעה' : formatCityList(alert.cities);
+  const cityText = nearby ? 'באזורך' : formatCityList(alert.cities);
 
   const instructions = nearby ? 'ייתכן ותשמעו צפירות' : alert.instructions || '';
 
@@ -245,9 +245,7 @@ async function generateAlertImage(alert, options = {}) {
     svg += `  <rect x="${CARD_MARGIN}" y="${CARD_TOP}" width="${CARD_WIDTH}" height="${grayZoneContentEnd - CARD_TOP}" clip-path="url(#cardClip)" fill="${colors.cardTopBg}"/>\n`;
   }
 
-  svg += nearby
-    ? iconExclamation(iconCx, iconCy, colors.iconStroke)
-    : getIcon(alert, iconCx, iconCy, colors.iconStroke);
+  svg += getIcon(alert, iconCx, iconCy, colors.iconStroke, { nearby });
 
   let curY = CARD_TOP + ICON_TOP_MARGIN + ICON_RADIUS * 2 + GAP_ICON_TO_TITLE;
 

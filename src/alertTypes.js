@@ -42,14 +42,13 @@ function formatAlertMessage(alert) {
   return lines.join('\n');
 }
 
-function formatAdjacentAlertMessage(alert) {
+function formatAdjacentAlertMessage() {
   const { date: dateStr, time: timeStr } = formatDateParts();
-  const title = alert.title || 'התרעה';
 
   const lines = [
     '*התרעה ביישובים סמוכים*',
     '',
-    `📍 ${title}`,
+    '📍 באזורך',
     '',
     'ייתכן ותשמעו צפירות',
     '',
