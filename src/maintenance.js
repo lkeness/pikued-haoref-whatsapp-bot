@@ -281,7 +281,6 @@ class MaintenanceChannel {
     const cwd = process.cwd();
     const execOpts = { cwd, timeout: 30000 };
     const longExecOpts = { cwd, timeout: 120000 };
-    const nvmCmd = (cmd) => `bash -lc "${cmd}"`;
     const preUpdateInfo = resolveGitInfo();
     const results = [];
     results.push(
@@ -308,7 +307,7 @@ class MaintenanceChannel {
         }
         await execAsync(`git reset --hard ${preUpdateInfo.fullHash}`, execOpts);
         try {
-          await execAsync(nvmCmd('npm install'), longExecOpts);
+          await execAsync('npm install', longExecOpts);
         } catch {
           /* best-effort */
         }
@@ -335,15 +334,7 @@ class MaintenanceChannel {
     }
 
     try {
-      await run('nvm use', nvmCmd('nvm use'));
-    } catch (err) {
-      const output = (err?.stderr || err?.stdout || err?.message || '').trim();
-      await revert('nvm use', output);
-      return results.join('\n');
-    }
-
-    try {
-      await run('npm install', nvmCmd('npm install'), longExecOpts);
+      await run('npm install', 'npm install', longExecOpts);
     } catch (err) {
       const output = (err?.stderr || err?.stdout || err?.message || '').trim();
       await revert('npm install', output);
