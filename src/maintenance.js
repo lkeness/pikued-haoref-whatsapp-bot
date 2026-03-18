@@ -201,8 +201,8 @@ class MaintenanceChannel {
           return null;
       }
     } catch (err) {
-      logger.warn('Maintenance: command failed', { text, error: err.message });
-      return `❌ Command failed: ${err.message}`;
+      logger.warn('Maintenance: command failed', { text, error: err?.message });
+      return `❌ Command failed: ${err?.message || 'unknown error'}`;
     }
   }
 
@@ -301,19 +301,27 @@ class MaintenanceChannel {
     const revert = async (failedLabel, failOutput) => {
       results.push(`❌ *${failedLabel}* failed\n${failOutput}`);
       try {
-        await execAsync(`git rebase --abort`, execOpts).catch(() => {});
+        try {
+          await execAsync(`git rebase --abort`, execOpts);
+        } catch {
+          /* best-effort */
+        }
         await execAsync(`git reset --hard ${preUpdateInfo.fullHash}`, execOpts);
-        await execAsync(nvmCmd('npm install'), longExecOpts).catch(() => {});
+        try {
+          await execAsync(nvmCmd('npm install'), longExecOpts);
+        } catch {
+          /* best-effort */
+        }
         results.push(`⏪ Reverted to ${preUpdateInfo.hash}`);
       } catch (revertErr) {
-        results.push(`⚠️ Revert failed: ${revertErr.message}`);
+        results.push(`⚠️ Revert failed: ${revertErr?.message}`);
       }
     };
 
     try {
       await run('git fetch', 'git fetch');
     } catch (err) {
-      const output = (err.stderr || err.stdout || err.message || '').trim();
+      const output = (err?.stderr || err?.stdout || err?.message || '').trim();
       results.push(`❌ *git fetch* failed\n${output}`);
       return results.join('\n');
     }
@@ -321,7 +329,7 @@ class MaintenanceChannel {
     try {
       await run('git rebase', 'git rebase');
     } catch (err) {
-      const output = (err.stderr || err.stdout || err.message || '').trim();
+      const output = (err?.stderr || err?.stdout || err?.message || '').trim();
       await revert('git rebase', output);
       return results.join('\n');
     }
@@ -329,7 +337,7 @@ class MaintenanceChannel {
     try {
       await run('nvm use', nvmCmd('nvm use'));
     } catch (err) {
-      const output = (err.stderr || err.stdout || err.message || '').trim();
+      const output = (err?.stderr || err?.stdout || err?.message || '').trim();
       await revert('nvm use', output);
       return results.join('\n');
     }
@@ -337,7 +345,7 @@ class MaintenanceChannel {
     try {
       await run('npm install', nvmCmd('npm install'), longExecOpts);
     } catch (err) {
-      const output = (err.stderr || err.stdout || err.message || '').trim();
+      const output = (err?.stderr || err?.stdout || err?.message || '').trim();
       await revert('npm install', output);
       return results.join('\n');
     }
@@ -350,7 +358,7 @@ class MaintenanceChannel {
     try {
       await run('pm2 restart', 'pm2 restart red-alert-whatsapp');
     } catch (err) {
-      const output = (err.stderr || err.stdout || err.message || '').trim();
+      const output = (err?.stderr || err?.stdout || err?.message || '').trim();
       await revert('pm2 restart', output);
       return results.join('\n');
     }
@@ -396,39 +404,44 @@ class MaintenanceChannel {
   }
 
   _formatStatus() {
-    const now = Date.now();
-    const cfg = this._deps.config;
-    const dedup = this._deps.dedup;
-    const lastPollAgo = this._stats.lastPollAt
-      ? `${Math.round((now - this._stats.lastPollAt) / 1000)}s ago`
-      : 'never';
-    const lastAlert = this._stats.lastAlertAt
-      ? `${Math.round((now - this._stats.lastAlertAt) / 1000)}s ago`
-      : 'none';
-    const mem = process.memoryUsage();
+    try {
+      const now = Date.now();
+      const cfg = this._deps.config;
+      const dedup = this._deps.dedup;
+      const lastPollAgo = this._stats.lastPollAt
+        ? `${Math.round((now - this._stats.lastPollAt) / 1000)}s ago`
+        : 'never';
+      const lastAlert = this._stats.lastAlertAt
+        ? `${Math.round((now - this._stats.lastAlertAt) / 1000)}s ago`
+        : 'none';
+      const mem = process.memoryUsage();
 
-    const lines = [
-      '📊 *Bot Status*',
-      '',
-      `🔖 Commit: ${this._gitInfo.hash} (${this._gitInfo.branch})`,
-      `⏱ Uptime: ${this._formatUptime()}`,
-      `📡 WhatsApp: ${this.whatsapp.ready ? '✅ connected' : '❌ disconnected'}`,
-      '',
-      `🏙 Filter: ${cfg ? (cfg.filterCities.length > 0 ? cfg.filterCities.join(', ') : 'ALL') : 'n/a'}`,
-      `🏘 Adjacent: ${cfg ? (cfg.adjacentCities.length > 0 ? cfg.adjacentCities.join(', ') : 'none') : 'n/a'}`,
-      `⏱ Poll: ${cfg ? `${cfg.pikudHaoref.pollIntervalMs}ms` : 'n/a'} — last: ${lastPollAgo}`,
-      '',
-      `📨 Sent: ${this._stats.alertsSent} | 📢 Adjacent: ${this._stats.adjacentAlertsSent} | ❌ Failed: ${this._stats.alertsFailed}`,
-      `🕐 Last alert: ${lastAlert}`,
-      `🔁 Dedup entries: ${dedup ? dedup.seen.size : 'n/a'}`,
-      `📋 Queue: ${this.whatsapp.queueSize} pending`,
-      `🔄 Reconnections: ${this._stats.reconnections}`,
-      `💾 Memory: ${Math.round(mem.heapUsed / 1024 / 1024)}MB | 🖥 Node: ${process.version}`,
-      '',
-      `🕐 ${formatTimestamp()}`,
-    ];
+      const lines = [
+        '📊 *Bot Status*',
+        '',
+        `🔖 Commit: ${this._gitInfo.hash} (${this._gitInfo.branch})`,
+        `⏱ Uptime: ${this._formatUptime()}`,
+        `📡 WhatsApp: ${this.whatsapp?.ready ? '✅ connected' : '❌ disconnected'}`,
+        '',
+        `🏙 Filter: ${cfg ? (cfg.filterCities.length > 0 ? cfg.filterCities.join(', ') : 'ALL') : 'n/a'}`,
+        `🏘 Adjacent: ${cfg ? (cfg.adjacentCities.length > 0 ? cfg.adjacentCities.join(', ') : 'none') : 'n/a'}`,
+        `⏱ Poll: ${cfg?.pikudHaoref ? `${cfg.pikudHaoref.pollIntervalMs}ms` : 'n/a'} — last: ${lastPollAgo}`,
+        '',
+        `📨 Sent: ${this._stats.alertsSent} | 📢 Adjacent: ${this._stats.adjacentAlertsSent} | ❌ Failed: ${this._stats.alertsFailed}`,
+        `🕐 Last alert: ${lastAlert}`,
+        `🔁 Dedup entries: ${dedup?.seen ? dedup.seen.size : 'n/a'}`,
+        `📋 Queue: ${this.whatsapp?.queueSize ?? 'n/a'} pending`,
+        `🔄 Reconnections: ${this._stats.reconnections}`,
+        `💾 Memory: ${Math.round(mem.heapUsed / 1024 / 1024)}MB | 🖥 Node: ${process.version}`,
+        '',
+        `🕐 ${formatTimestamp()}`,
+      ];
 
-    return lines.join('\n');
+      return lines.join('\n');
+    } catch (err) {
+      logger.warn('Maintenance: formatStatus failed', { error: err?.message });
+      return '📊 *Bot Status*\n\n⚠️ Could not generate full status report.';
+    }
   }
 
   _formatUptime() {
@@ -448,15 +461,20 @@ class MaintenanceChannel {
 
   async _drainSendQueue() {
     this._draining = true;
-    while (this._sendQueue.length > 0) {
-      const elapsed = Date.now() - this._lastSendAt;
-      if (elapsed < MAINTENANCE_MIN_SEND_INTERVAL_MS) {
-        await new Promise((r) => setTimeout(r, MAINTENANCE_MIN_SEND_INTERVAL_MS - elapsed));
+    try {
+      while (this._sendQueue.length > 0) {
+        const elapsed = Date.now() - this._lastSendAt;
+        if (elapsed < MAINTENANCE_MIN_SEND_INTERVAL_MS) {
+          await new Promise((r) => setTimeout(r, MAINTENANCE_MIN_SEND_INTERVAL_MS - elapsed));
+        }
+        const text = this._sendQueue.shift();
+        await this._sendDirect(text);
       }
-      const text = this._sendQueue.shift();
-      await this._sendDirect(text);
+    } catch (err) {
+      logger.warn('Maintenance: drain queue error', { error: err?.message });
+    } finally {
+      this._draining = false;
     }
-    this._draining = false;
   }
 
   async _sendDirect(text) {
@@ -464,7 +482,7 @@ class MaintenanceChannel {
       this._lastSendAt = Date.now();
       await this.whatsapp.sendRaw(this.groupId, { text });
     } catch (err) {
-      logger.warn('Maintenance: send failed', { error: err.message });
+      logger.warn('Maintenance: send failed', { error: err?.message });
     }
   }
 }
