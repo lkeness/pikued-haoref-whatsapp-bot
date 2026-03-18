@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const { promisify } = require('util');
 const logger = require('./logger');
 const { formatTimestamp } = require('./utils');
@@ -6,10 +6,21 @@ const { MAINTENANCE_MIN_SEND_INTERVAL_MS } = require('./constants');
 
 const execAsync = promisify(exec);
 
+function resolveGitInfo() {
+  try {
+    const hash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
+    return { hash, branch };
+  } catch {
+    return { hash: 'unknown', branch: 'unknown' };
+  }
+}
+
 class MaintenanceChannel {
   constructor({ whatsapp, groupId }) {
     this.whatsapp = whatsapp;
     this.groupId = groupId;
+    this._gitInfo = resolveGitInfo();
     this._statusTimer = null;
     this._lastSendAt = 0;
     this._sendQueue = [];
@@ -66,15 +77,21 @@ class MaintenanceChannel {
   notifyStartup(config) {
     if (!this.enabled) return;
     try {
+      const mem = process.memoryUsage();
       const lines = [
         '🟢 *Alert Bot Online*',
         '',
         `🕐 ${formatTimestamp()}`,
-        `⏱ Poll: ${config.pikudHaoref.pollIntervalMs}ms`,
+        `🔖 Commit: ${this._gitInfo.hash} (${this._gitInfo.branch})`,
+        `🖥 Node: ${process.version}`,
+        '',
         `🏙 Filter: ${config.filterCities.length > 0 ? config.filterCities.join(', ') : 'ALL'}`,
         `🏘 Adjacent: ${config.adjacentCities.length > 0 ? config.adjacentCities.join(', ') : 'none'}`,
+        `⏱ Poll: ${config.pikudHaoref.pollIntervalMs}ms`,
         `📨 Event ended: ${config.sendEventEnded ? 'Yes' : 'No'}`,
+        `🔁 Dedup window: ${config.dedupWindowMs / 1000}s`,
         `📋 Queue: ${this.whatsapp.queueSize} pending`,
+        `💾 Memory: ${Math.round(mem.heapUsed / 1024 / 1024)}MB`,
       ];
       this._enqueueSend(lines.join('\n'));
     } catch (err) {
@@ -89,9 +106,13 @@ class MaintenanceChannel {
         '🔴 *Alert Bot Shutting Down*',
         '',
         `🕐 ${formatTimestamp()}`,
+        `🔖 Commit: ${this._gitInfo.hash} (${this._gitInfo.branch})`,
         `Signal: ${signal}`,
-        `📋 Queue: ${this.whatsapp.queueSize} pending`,
         `⏱ Uptime: ${this._formatUptime()}`,
+        '',
+        `📨 Sent: ${this._stats.alertsSent} | 📢 Adjacent: ${this._stats.adjacentAlertsSent} | ❌ Failed: ${this._stats.alertsFailed}`,
+        `📋 Queue: ${this.whatsapp.queueSize} pending`,
+        `🔄 Reconnections: ${this._stats.reconnections}`,
       ];
       return this._sendDirect(lines.join('\n'));
     } catch (err) {
@@ -257,7 +278,13 @@ class MaintenanceChannel {
 
   async _cmdUpdate() {
     const results = [];
-    results.push('🔄 *Updating Bot*', '', `🕐 ${formatTimestamp()}`, '');
+    results.push(
+      '🔄 *Updating Bot*',
+      '',
+      `🕐 ${formatTimestamp()}`,
+      `🔖 Current: ${this._gitInfo.hash} (${this._gitInfo.branch})`,
+      '',
+    );
 
     const steps = [
       { label: 'git fetch', cmd: 'git fetch' },
@@ -278,6 +305,11 @@ class MaintenanceChannel {
         results.push(`❌ *${step.label}* failed\n${output}`);
         break;
       }
+    }
+
+    const newInfo = resolveGitInfo();
+    if (newInfo.hash !== this._gitInfo.hash) {
+      results.push('', `🔖 New: ${newInfo.hash} (${newInfo.branch})`);
     }
 
     return results.join('\n');
@@ -322,6 +354,8 @@ class MaintenanceChannel {
 
   _formatStatus() {
     const now = Date.now();
+    const cfg = this._deps.config;
+    const dedup = this._deps.dedup;
     const lastPollAgo = this._stats.lastPollAt
       ? `${Math.round((now - this._stats.lastPollAt) / 1000)}s ago`
       : 'never';
@@ -330,22 +364,28 @@ class MaintenanceChannel {
       : 'none';
     const mem = process.memoryUsage();
 
-    return [
+    const lines = [
       '📊 *Bot Status*',
       '',
+      `🔖 Commit: ${this._gitInfo.hash} (${this._gitInfo.branch})`,
       `⏱ Uptime: ${this._formatUptime()}`,
       `📡 WhatsApp: ${this.whatsapp.ready ? '✅ connected' : '❌ disconnected'}`,
-      `🔄 Last poll: ${lastPollAgo}`,
-      `📨 Sent: ${this._stats.alertsSent}`,
-      `📢 Adjacent: ${this._stats.adjacentAlertsSent}`,
-      `❌ Failed: ${this._stats.alertsFailed}`,
+      '',
+      `🏙 Filter: ${cfg ? (cfg.filterCities.length > 0 ? cfg.filterCities.join(', ') : 'ALL') : 'n/a'}`,
+      `🏘 Adjacent: ${cfg ? (cfg.adjacentCities.length > 0 ? cfg.adjacentCities.join(', ') : 'none') : 'n/a'}`,
+      `⏱ Poll: ${cfg ? `${cfg.pikudHaoref.pollIntervalMs}ms` : 'n/a'} — last: ${lastPollAgo}`,
+      '',
+      `📨 Sent: ${this._stats.alertsSent} | 📢 Adjacent: ${this._stats.adjacentAlertsSent} | ❌ Failed: ${this._stats.alertsFailed}`,
       `🕐 Last alert: ${lastAlert}`,
+      `🔁 Dedup entries: ${dedup ? dedup.seen.size : 'n/a'}`,
       `📋 Queue: ${this.whatsapp.queueSize} pending`,
       `🔄 Reconnections: ${this._stats.reconnections}`,
-      `💾 Memory: ${Math.round(mem.heapUsed / 1024 / 1024)}MB`,
+      `💾 Memory: ${Math.round(mem.heapUsed / 1024 / 1024)}MB | 🖥 Node: ${process.version}`,
       '',
       `🕐 ${formatTimestamp()}`,
-    ].join('\n');
+    ];
+
+    return lines.join('\n');
   }
 
   _formatUptime() {
