@@ -21,20 +21,31 @@ class AlertDeduplicator {
   isDuplicate(alert) {
     this._cleanup();
 
-    if (alert.source === 'pikud_haoref') {
-      const isDup = alert.id ? this.seen.has(`id::${alert.id}`) : false;
-      if (isDup) {
-        logger.debug('Dedup: live alert already seen', { id: alert.id });
-      }
-      return isDup;
+    if (alert.id && this.seen.has(`id::${alert.id}`)) {
+      logger.debug('Dedup: alert already seen by id', { id: alert.id });
+      return true;
     }
 
     const key = this._contentKey(alert.cat, alert.cities);
-    const isDup = this.seen.has(key);
-    if (isDup) {
-      logger.debug('Dedup: history content already seen', { key });
+    if (this.seen.has(key)) {
+      logger.debug('Dedup: alert already seen by content key', { key });
+      return true;
     }
-    return isDup;
+
+    if (alert.cities && alert.cities.length > 0) {
+      const allSeen = alert.cities.every((city) =>
+        this.seen.has(this._contentKey(alert.cat, [city])),
+      );
+      if (allSeen) {
+        logger.debug('Dedup: all cities already seen individually', {
+          cat: alert.cat,
+          cities: alert.cities,
+        });
+        return true;
+      }
+    }
+
+    return false;
   }
 
   markSeen(alert) {
@@ -42,7 +53,11 @@ class AlertDeduplicator {
     if (alert.id) {
       this.seen.set(`id::${alert.id}`, now);
     }
-    for (const city of alert.cities || []) {
+    const cities = alert.cities || [];
+    if (cities.length > 0) {
+      this.seen.set(this._contentKey(alert.cat, cities), now);
+    }
+    for (const city of cities) {
       this.seen.set(this._contentKey(alert.cat, [city]), now);
     }
     this._save();

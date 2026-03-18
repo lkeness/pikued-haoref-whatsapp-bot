@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { DEFAULT_DEDUP_WINDOW_MS } = require('./constants');
 
 const required = ['WHATSAPP_GROUP_ID'];
 for (const key of required) {
@@ -21,7 +22,7 @@ const config = {
         .filter(Boolean)
     : [],
   sendEventEnded: (process.env.SEND_EVENT_ENDED || '').toLowerCase() !== 'false',
-  dedupWindowMs: parseInt(process.env.DEDUP_WINDOW_MS, 10) || 60000,
+  dedupWindowMs: parseInt(process.env.DEDUP_WINDOW_MS, 10) || DEFAULT_DEDUP_WINDOW_MS,
   maintenanceStatusIntervalMs:
     parseInt(process.env.MAINTENANCE_STATUS_INTERVAL_MS, 10) || 30 * 60 * 1000,
   maxQueueAgeMs: parseInt(process.env.MAX_QUEUE_AGE_MS, 10) || 180000,
