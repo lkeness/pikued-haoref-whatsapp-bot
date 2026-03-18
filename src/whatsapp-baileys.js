@@ -139,10 +139,6 @@ class WhatsAppClient {
       this.sock.ev.on('messages.upsert', (ev) => {
         const messages = ev?.messages;
         if (!messages) return;
-        logger.debug('WhatsApp: messages.upsert', {
-          count: messages.length,
-          type: ev?.type,
-        });
         for (const msg of messages) {
           try {
             if (!msg?.key) continue;
@@ -150,18 +146,15 @@ class WhatsAppClient {
             const fromMe = !!msg.key.fromMe;
             let jid = msg.key.remoteJid;
 
-            if (!msg.message) {
-              logger.debug('WhatsApp: skipping msg without content', {
-                jid,
-                fromMe,
-                stubType: msg.messageStubType,
-              });
-              continue;
+            if (!msg.message) continue;
+
+            const dsm = msg.message.deviceSentMessage;
+            if (dsm) {
+              jid = dsm.destinationJid || jid;
             }
 
-            const content = extractMessageContent(msg.message) || {};
-
-            const text = content.conversation || content.extendedTextMessage?.text || '';
+            const inner = extractMessageContent(dsm?.message || msg.message) || {};
+            const text = inner.conversation || inner.extendedTextMessage?.text || '';
             if (!text) continue;
 
             const trimmed = text.trim();
