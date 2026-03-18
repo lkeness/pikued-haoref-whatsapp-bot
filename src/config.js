@@ -21,6 +21,11 @@ const config = {
         .map((c) => c.trim())
         .filter(Boolean)
     : [],
+  adjacentCities: process.env.ADJACENT_CITIES
+    ? process.env.ADJACENT_CITIES.split(',')
+        .map((c) => c.trim())
+        .filter(Boolean)
+    : [],
   sendEventEnded: (process.env.SEND_EVENT_ENDED || '').toLowerCase() !== 'false',
   dedupWindowMs: parseInt(process.env.DEDUP_WINDOW_MS, 10) || DEFAULT_DEDUP_WINDOW_MS,
   maintenanceStatusIntervalMs:

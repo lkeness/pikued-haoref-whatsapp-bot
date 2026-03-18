@@ -14,6 +14,7 @@ class MaintenanceChannel {
     this._stats = {
       startedAt: Date.now(),
       alertsSent: 0,
+      adjacentAlertsSent: 0,
       alertsFailed: 0,
       lastAlertAt: null,
       lastPollAt: null,
@@ -33,6 +34,11 @@ class MaintenanceChannel {
 
   recordAlertSent() {
     this._stats.alertsSent++;
+    this._stats.lastAlertAt = Date.now();
+  }
+
+  recordAdjacentAlertSent() {
+    this._stats.adjacentAlertsSent++;
     this._stats.lastAlertAt = Date.now();
   }
 
@@ -62,6 +68,7 @@ class MaintenanceChannel {
         `🕐 ${formatTimestamp()}`,
         `⏱ Poll: ${config.pikudHaoref.pollIntervalMs}ms`,
         `🏙 Filter: ${config.filterCities.length > 0 ? config.filterCities.join(', ') : 'ALL'}`,
+        `🏘 Adjacent: ${config.adjacentCities.length > 0 ? config.adjacentCities.join(', ') : 'none'}`,
         `📨 Event ended: ${config.sendEventEnded ? 'Yes' : 'No'}`,
         `📋 Queue: ${this.whatsapp.queueSize} pending`,
       ];
@@ -249,6 +256,7 @@ class MaintenanceChannel {
       '',
       `Poll interval: ${cfg.pikudHaoref.pollIntervalMs}ms`,
       `Filter cities: ${cfg.filterCities.length > 0 ? cfg.filterCities.join(', ') : 'ALL'}`,
+      `Adjacent cities: ${cfg.adjacentCities.length > 0 ? cfg.adjacentCities.join(', ') : 'none'}`,
       `Send event ended: ${cfg.sendEventEnded ? 'Yes' : 'No'}`,
       `Dedup window: ${cfg.dedupWindowMs / 1000}s`,
       `Maintenance status interval: ${cfg.maintenanceStatusIntervalMs / 60000}min`,
@@ -292,6 +300,7 @@ class MaintenanceChannel {
       `📡 WhatsApp: ${this.whatsapp.ready ? '✅ connected' : '❌ disconnected'}`,
       `🔄 Last poll: ${lastPollAgo}`,
       `📨 Sent: ${this._stats.alertsSent}`,
+      `📢 Adjacent: ${this._stats.adjacentAlertsSent}`,
       `❌ Failed: ${this._stats.alertsFailed}`,
       `🕐 Last alert: ${lastAlert}`,
       `📋 Queue: ${this.whatsapp.queueSize} pending`,

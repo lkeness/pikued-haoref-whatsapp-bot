@@ -43,6 +43,16 @@ const COLORS = {
     timestamp: '#FFFFFF',
     iconStroke: '#EA780E',
   },
+  nearby: {
+    bg: '#EA780E',
+    cardBg: '#FFFFFF',
+    title: '#EA780E',
+    city: '#EA780E',
+    instructions: '#EA780E',
+    instructionsOpacity: '0.75',
+    timestamp: '#FFFFFF',
+    iconStroke: '#EA780E',
+  },
 };
 
 function getColors(alert) {
@@ -118,15 +128,16 @@ function wrapText(text, maxChars) {
   return lines;
 }
 
-async function generateAlertImage(alert) {
-  const colors = getColors(alert);
-  const eventEndedLook = isEventEndedStyle(alert);
+async function generateAlertImage(alert, options = {}) {
+  const nearby = !!options.nearby;
+  const colors = nearby ? COLORS.nearby : getColors(alert);
+  const eventEndedLook = !nearby && isEventEndedStyle(alert);
 
-  const title = alert.title || 'התרעה';
+  const title = nearby ? 'התרעה ביישובים סמוכים' : alert.title || 'התרעה';
 
-  const cityText = formatCityList(alert.cities);
+  const cityText = nearby ? alert.title || 'התרעה' : formatCityList(alert.cities);
 
-  const instructions = alert.instructions || '';
+  const instructions = nearby ? 'ייתכן ותשמעו צפירות' : alert.instructions || '';
 
   const { date: dateStr, time: timeStr } = formatDateParts();
 
@@ -234,7 +245,9 @@ async function generateAlertImage(alert) {
     svg += `  <rect x="${CARD_MARGIN}" y="${CARD_TOP}" width="${CARD_WIDTH}" height="${grayZoneContentEnd - CARD_TOP}" clip-path="url(#cardClip)" fill="${colors.cardTopBg}"/>\n`;
   }
 
-  svg += getIcon(alert, iconCx, iconCy, colors.iconStroke);
+  svg += nearby
+    ? iconExclamation(iconCx, iconCy, colors.iconStroke)
+    : getIcon(alert, iconCx, iconCy, colors.iconStroke);
 
   let curY = CARD_TOP + ICON_TOP_MARGIN + ICON_RADIUS * 2 + GAP_ICON_TO_TITLE;
 

@@ -1,6 +1,10 @@
 const config = require('./config');
 const logger = require('./logger');
-const { formatAlertMessage, isReleaseMessage } = require('./alertTypes');
+const {
+  formatAlertMessage,
+  formatAdjacentAlertMessage,
+  isReleaseMessage,
+} = require('./alertTypes');
 const { generateAlertImage } = require('./alertImage');
 const AlertDeduplicator = require('./dedup');
 const PikudHaorefSource = require('./pikudHaoref');
@@ -38,6 +42,7 @@ process.stdout.write = function (chunk, encoding, callback) {
 logger.info('Starting Red Alert WhatsApp Bot', {
   pollIntervalMs: config.pikudHaoref.pollIntervalMs,
   filterCities: config.filterCities.length > 0 ? config.filterCities : 'ALL',
+  adjacentCities: config.adjacentCities.length > 0 ? config.adjacentCities : 'none',
   groupId: config.whatsappGroupId,
   maintenanceGroup: config.maintenanceGroupId ? 'configured' : 'none',
 });
@@ -83,7 +88,17 @@ async function handleAlert(alert) {
       const matchingCities = alert.cities.filter((city) =>
         config.filterCities.some((filter) => city === filter),
       );
-      if (matchingCities.length === 0) return true;
+      if (matchingCities.length === 0) {
+        if (config.adjacentCities.length > 0) {
+          const adjacentMatches = alert.cities.filter((city) =>
+            config.adjacentCities.some((filter) => city === filter),
+          );
+          if (adjacentMatches.length > 0) {
+            return handleAdjacentAlert(alert, adjacentMatches);
+          }
+        }
+        return true;
+      }
       alert.cities = matchingCities;
     }
 
@@ -122,6 +137,45 @@ async function handleAlert(alert) {
     maintenance.recordAlertFailed();
     return false;
   });
+}
+
+async function handleAdjacentAlert(alert, adjacentCities) {
+  const dedupAlert = { ...alert, cities: ['__adjacent__'] };
+
+  logger.info(
+    `📢 NEARBY ALERT: cat=${alert.cat} "${alert.title}" (${adjacentCities.length} adjacent cities)`,
+    { id: alert.raw?.id, cat: alert.cat, title: alert.title, adjacentCities },
+  );
+
+  if (dedup.isDuplicate(dedupAlert)) {
+    logger.info('Duplicate adjacent alert, skipping');
+    return true;
+  }
+
+  let sent;
+  const textMessage = formatAdjacentAlertMessage(alert);
+
+  try {
+    const imageBuffer = await generateAlertImage(alert, { nearby: true });
+    const { time } = formatDateParts();
+    const caption = time.slice(0, 5);
+    sent = await whatsapp.sendImage(imageBuffer, caption);
+  } catch (err) {
+    logger.warn('Adjacent image failed, sending text', { error: err.message });
+    sent = await whatsapp.sendMessage(textMessage);
+  }
+
+  dedup.markSeen(dedupAlert);
+
+  if (sent) {
+    logger.info('Adjacent alert delivered');
+    maintenance.recordAdjacentAlertSent();
+    return true;
+  }
+
+  logger.warn('Adjacent alert queued for retry');
+  maintenance.recordAlertFailed();
+  return false;
 }
 
 let pikudSource = null;
