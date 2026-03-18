@@ -158,7 +158,6 @@ class WhatsAppClient {
             if (!text) continue;
 
             const trimmed = text.trim();
-            logger.info('WhatsApp: message received', { jid, fromMe, text: trimmed });
             setImmediate(async () => {
               try {
                 await this._onMessage(jid, trimmed, fromMe);

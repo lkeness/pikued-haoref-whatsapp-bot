@@ -52,8 +52,9 @@ const dedup = new AlertDeduplicator(config.dedupWindowMs);
 const whatsapp = new WhatsAppClient({
   groupId: config.whatsappGroupId,
   maxQueueAgeMs: config.maxQueueAgeMs,
-  onMessage: async (jid, text, _fromMe) => {
+  onMessage: async (jid, text, fromMe) => {
     if (config.maintenanceGroupId && jid === config.maintenanceGroupId && maintenance.enabled) {
+      logger.info('Maintenance: message received', { fromMe, text });
       try {
         const response = await maintenance.handleCommand(text);
         if (response) {
