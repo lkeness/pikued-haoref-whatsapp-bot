@@ -141,16 +141,24 @@ class WhatsAppClient {
       this.sock.ev.on('messages.upsert', ({ messages }) => {
         for (const msg of messages) {
           if (!msg.message) continue;
+
+          let innerMessage = msg.message;
+          let jid = msg.key.remoteJid;
+          const fromMe = !!msg.key.fromMe;
+
+          if (innerMessage.deviceSentMessage) {
+            jid = innerMessage.deviceSentMessage.destinationJid || jid;
+            innerMessage = innerMessage.deviceSentMessage.message || innerMessage;
+          }
+
           const text =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            msg.message.ephemeralMessage?.message?.conversation ||
-            msg.message.ephemeralMessage?.message?.extendedTextMessage?.text ||
+            innerMessage.conversation ||
+            innerMessage.extendedTextMessage?.text ||
+            innerMessage.ephemeralMessage?.message?.conversation ||
+            innerMessage.ephemeralMessage?.message?.extendedTextMessage?.text ||
             '';
           if (text) {
-            const jid = msg.key.remoteJid;
             const trimmed = text.trim();
-            const fromMe = !!msg.key.fromMe;
             logger.info('WhatsApp: message received', { jid, fromMe, text: trimmed });
             setImmediate(() => {
               try {
