@@ -1,6 +1,10 @@
+const { exec } = require('child_process');
+const { promisify } = require('util');
 const logger = require('./logger');
 const { formatTimestamp } = require('./utils');
 const { MAINTENANCE_MIN_SEND_INTERVAL_MS } = require('./constants');
+
+const execAsync = promisify(exec);
 
 class MaintenanceChannel {
   constructor({ whatsapp, groupId }) {
@@ -159,6 +163,10 @@ class MaintenanceChannel {
         case '!dedup':
           return this._cmdDedup(arg);
 
+        case 'update':
+        case '!update':
+          return await this._cmdUpdate();
+
         case 'config':
         case '!config':
           return this._cmdConfig();
@@ -247,6 +255,34 @@ class MaintenanceChannel {
     return lines.join('\n');
   }
 
+  async _cmdUpdate() {
+    const results = [];
+    results.push('🔄 *Updating Bot*', '', `🕐 ${formatTimestamp()}`, '');
+
+    const steps = [
+      { label: 'git fetch', cmd: 'git fetch' },
+      { label: 'git rebase', cmd: 'git rebase' },
+      { label: 'pm2 restart', cmd: 'pm2 restart red-alert-whatsapp' },
+    ];
+
+    for (const step of steps) {
+      try {
+        const { stdout, stderr } = await execAsync(step.cmd, {
+          cwd: process.cwd(),
+          timeout: 30000,
+        });
+        const output = (stdout || stderr || '').trim();
+        results.push(`✅ *${step.label}*${output ? `\n${output}` : ''}`);
+      } catch (err) {
+        const output = (err.stderr || err.stdout || err.message || '').trim();
+        results.push(`❌ *${step.label}* failed\n${output}`);
+        break;
+      }
+    }
+
+    return results.join('\n');
+  }
+
   _cmdConfig() {
     const cfg = this._deps.config;
     if (!cfg) return '❌ Config not available.';
@@ -278,6 +314,7 @@ class MaintenanceChannel {
       '• *queue clear* — Clear the message queue',
       '• *dedup* — Show dedup state',
       '• *dedup clear* — Clear dedup (allows re-sending)',
+      '• *update* — Pull latest code & restart via pm2',
       '• *config* — Show running configuration',
       '• *help* — This message',
     ].join('\n');
