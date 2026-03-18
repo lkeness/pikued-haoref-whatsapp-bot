@@ -3,6 +3,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  extractMessageContent,
   delay,
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
@@ -135,40 +136,37 @@ class WhatsAppClient {
     });
 
     if (this._onMessage) {
-      this.sock.ev.on('messages.upsert', ({ messages } = {}) => {
+      this.sock.ev.on('messages.upsert', (ev) => {
+        const messages = ev?.messages;
         if (!messages) return;
         for (const msg of messages) {
           try {
             if (!msg?.message || !msg.key) continue;
 
-            let innerMessage = msg.message;
             let jid = msg.key.remoteJid;
             const fromMe = !!msg.key.fromMe;
 
-            if (innerMessage.deviceSentMessage) {
-              jid = innerMessage.deviceSentMessage.destinationJid || jid;
-              innerMessage = innerMessage.deviceSentMessage.message || innerMessage;
+            const dsm = msg.message.deviceSentMessage;
+            if (dsm) {
+              jid = dsm.destinationJid || jid;
             }
 
-            const text =
-              innerMessage.conversation ||
-              innerMessage.extendedTextMessage?.text ||
-              innerMessage.ephemeralMessage?.message?.conversation ||
-              innerMessage.ephemeralMessage?.message?.extendedTextMessage?.text ||
-              '';
-            if (text) {
-              const trimmed = text.trim();
-              logger.info('WhatsApp: message received', { jid, fromMe, text: trimmed });
-              setImmediate(async () => {
-                try {
-                  await this._onMessage(jid, trimmed, fromMe);
-                } catch (err) {
-                  logger.debug('WhatsApp: message handler error', { error: err?.message });
-                }
-              });
-            }
+            const innerMessage = extractMessageContent(dsm?.message || msg.message) || {};
+
+            const text = innerMessage.conversation || innerMessage.extendedTextMessage?.text || '';
+            if (!text) continue;
+
+            const trimmed = text.trim();
+            logger.info('WhatsApp: message received', { jid, fromMe, text: trimmed });
+            setImmediate(async () => {
+              try {
+                await this._onMessage(jid, trimmed, fromMe);
+              } catch (err) {
+                logger.warn('WhatsApp: message handler error', { error: err?.message });
+              }
+            });
           } catch (err) {
-            logger.debug('WhatsApp: error processing incoming message', {
+            logger.warn('WhatsApp: error processing incoming message', {
               error: err?.message,
             });
           }
