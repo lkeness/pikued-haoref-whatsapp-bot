@@ -277,38 +277,60 @@ class MaintenanceChannel {
   }
 
   async _cmdUpdate() {
+    const execOpts = { cwd: process.cwd(), timeout: 30000 };
+    const originalHash = this._gitInfo.hash;
     const results = [];
     results.push(
       '🔄 *Updating Bot*',
       '',
       `🕐 ${formatTimestamp()}`,
-      `🔖 Current: ${this._gitInfo.hash} (${this._gitInfo.branch})`,
+      `🔖 Current: ${originalHash} (${this._gitInfo.branch})`,
       '',
     );
 
-    const steps = [
-      { label: 'git fetch', cmd: 'git fetch' },
-      { label: 'git rebase', cmd: 'git rebase' },
-      { label: 'pm2 restart', cmd: 'pm2 restart red-alert-whatsapp' },
-    ];
+    const run = async (label, cmd) => {
+      const { stdout, stderr } = await execAsync(cmd, execOpts);
+      const output = (stdout || stderr || '').trim();
+      results.push(`✅ *${label}*${output ? `\n${output}` : ''}`);
+    };
 
-    for (const step of steps) {
+    const revert = async (failedLabel, failOutput) => {
+      results.push(`❌ *${failedLabel}* failed\n${failOutput}`);
       try {
-        const { stdout, stderr } = await execAsync(step.cmd, {
-          cwd: process.cwd(),
-          timeout: 30000,
-        });
-        const output = (stdout || stderr || '').trim();
-        results.push(`✅ *${step.label}*${output ? `\n${output}` : ''}`);
-      } catch (err) {
-        const output = (err.stderr || err.stdout || err.message || '').trim();
-        results.push(`❌ *${step.label}* failed\n${output}`);
-        break;
+        await execAsync(`git rebase --abort`, execOpts).catch(() => {});
+        await execAsync(`git reset --hard ${originalHash}`, execOpts);
+        results.push(`⏪ Reverted to ${originalHash}`);
+      } catch (revertErr) {
+        results.push(`⚠️ Revert failed: ${revertErr.message}`);
       }
+    };
+
+    try {
+      await run('git fetch', 'git fetch');
+    } catch (err) {
+      const output = (err.stderr || err.stdout || err.message || '').trim();
+      results.push(`❌ *git fetch* failed\n${output}`);
+      return results.join('\n');
+    }
+
+    try {
+      await run('git rebase', 'git rebase');
+    } catch (err) {
+      const output = (err.stderr || err.stdout || err.message || '').trim();
+      await revert('git rebase', output);
+      return results.join('\n');
+    }
+
+    try {
+      await run('pm2 restart', 'pm2 restart red-alert-whatsapp');
+    } catch (err) {
+      const output = (err.stderr || err.stdout || err.message || '').trim();
+      await revert('pm2 restart', output);
+      return results.join('\n');
     }
 
     const newInfo = resolveGitInfo();
-    if (newInfo.hash !== this._gitInfo.hash) {
+    if (newInfo.hash !== originalHash) {
       results.push('', `🔖 New: ${newInfo.hash} (${newInfo.branch})`);
     }
 
