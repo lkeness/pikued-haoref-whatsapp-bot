@@ -42,10 +42,29 @@ function formatAlertMessage(alert) {
   return lines.join('\n');
 }
 
+function formatAdjacentAlertMessage(alert) {
+  const { date: dateStr, time: timeStr } = formatDateParts();
+  const title = alert.title || 'התרעה';
+
+  const lines = [
+    '*התרעה ביישובים סמוכים*',
+    '',
+    `📍 ${title}`,
+    '',
+    'ייתכן ותשמעו צפירות',
+    '',
+    `🕐 נשלח ב- ${dateStr} | ${timeStr}`,
+    `📡 מקור: פיקוד העורף`,
+  ];
+
+  return lines.join('\n');
+}
+
 module.exports = {
   isReleaseMessage,
   isHfcUpdate,
   historyCatToLiveCat,
   formatAlertMessage,
+  formatAdjacentAlertMessage,
   formatCityList,
 };
