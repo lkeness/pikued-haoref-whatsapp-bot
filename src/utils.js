@@ -54,7 +54,8 @@ function formatDateParts() {
     now.toLocaleDateString(LOCALE, { timeZone: TIMEZONE, month: '2-digit' }),
   ).padStart(2, '0');
   const yyyy = now.toLocaleDateString(LOCALE, { timeZone: TIMEZONE, year: 'numeric' });
-  const time = now.toLocaleTimeString(LOCALE, { timeZone: TIMEZONE, hour12: false });
+  const rawTime = now.toLocaleTimeString(LOCALE, { timeZone: TIMEZONE, hour12: false });
+  const time = rawTime.padStart(8, '0');
   return { date: `${dd}/${mm}/${yyyy}`, time };
 }
 
