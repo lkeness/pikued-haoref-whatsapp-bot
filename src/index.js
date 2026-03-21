@@ -11,7 +11,7 @@ const PikudHaorefSource = require('./pikudHaoref');
 const WhatsAppClient = require('./whatsapp-baileys');
 const MaintenanceChannel = require('./maintenance');
 const alertMetadata = require('./alertMetadata');
-const { createMutex, formatDateParts } = require('./utils');
+const { createMutex } = require('./utils');
 const { LIBSIGNAL_NOISE_PATTERNS, CRASH_EXIT_DELAY_MS } = require('./constants');
 
 function isLibsignalNoise(str) {
@@ -124,9 +124,7 @@ async function handleAlert(alert) {
 
     try {
       const imageBuffer = await generateAlertImage(alert);
-      const { time } = formatDateParts();
-      const caption = time.slice(0, 5);
-      sent = await whatsapp.sendImage(imageBuffer, caption);
+      sent = await whatsapp.sendImage(imageBuffer, textMessage);
     } catch (err) {
       logger.warn('Image failed, sending text', { error: err?.message });
       try {
@@ -165,13 +163,11 @@ async function handleAdjacentAlert(alert, adjacentCities) {
   }
 
   let sent;
-  const textMessage = formatAdjacentAlertMessage(alert);
+  const textMessage = formatAdjacentAlertMessage(alert, adjacentCities);
 
   try {
     const imageBuffer = await generateAlertImage(alert, { nearby: true });
-    const { time } = formatDateParts();
-    const caption = time.slice(0, 5);
-    sent = await whatsapp.sendImage(imageBuffer, caption);
+    sent = await whatsapp.sendImage(imageBuffer, textMessage);
   } catch (err) {
     logger.warn('Adjacent image failed, sending text', { error: err?.message });
     try {

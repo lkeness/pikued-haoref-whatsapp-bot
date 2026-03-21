@@ -25,38 +25,24 @@ function formatCityList(cities) {
   return cities.join(', ');
 }
 
-function formatAlertMessage(alert) {
-  const { date: dateStr, time: timeStr } = formatDateParts();
-  const title = alert.title || 'התרעה';
-  const cityList = formatCityList(alert.cities);
-
-  const lines = [`*${title}*`, '', `📍 ${cityList}`];
-
-  if (alert.instructions) {
-    lines.push('', alert.instructions);
+function getAlertEmoji(alert) {
+  if (isHfcUpdate(alert)) {
+    return isReleaseMessage(alert) ? '🔵' : '🟠';
   }
-
-  lines.push('', `🕐 נשלח ב- ${dateStr} | ${timeStr}`);
-  lines.push(`📡 מקור: פיקוד העורף`);
-
-  return lines.join('\n');
+  return '🔴';
 }
 
-function formatAdjacentAlertMessage() {
-  const { date: dateStr, time: timeStr } = formatDateParts();
+function formatAlertMessage(alert) {
+  const { time: timeStr } = formatDateParts();
+  const title = alert.title || 'התרעה';
+  return `${getAlertEmoji(alert)} ${title} | ${timeStr}`;
+}
 
-  const lines = [
-    '*התרעה ביישובים סמוכים*',
-    '',
-    '📍 באזורך',
-    '',
-    'ייתכן ותשמעו צפירות',
-    '',
-    `🕐 נשלח ב- ${dateStr} | ${timeStr}`,
-    `📡 מקור: פיקוד העורף`,
-  ];
-
-  return lines.join('\n');
+function formatAdjacentAlertMessage(alert, adjacentCities) {
+  const { time: timeStr } = formatDateParts();
+  const title = alert.title || 'התרעה';
+  const cityList = formatCityList(adjacentCities);
+  return `${getAlertEmoji(alert)} ${title} (ביישובים סמוכים) | ${cityList} | ${timeStr}`;
 }
 
 module.exports = {
